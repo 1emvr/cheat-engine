@@ -19,10 +19,10 @@ int main(void) {
 	unsigned int sizeofbss;
 	unsigned int FirstFreeAddress = 0;
 
-	// NOTE: just making more readable. breaking statements up probably won't change what the compiler produces.
+	// NOTE: just making more readable. breaking statements up probably won't change what the compiler produces (probably slower too).
 	fpVMMMAP=fopen("vmm.map","r"); 
   	if (!fpVMMMAP) {
-		printf("Failed opening vmm.map\n");
+		printf("ERR: failed opening vmm.map\n");
 		errorcode=1;
 		goto defer;
 	}
@@ -51,49 +51,47 @@ int main(void) {
 	if ((startofbss+sizeofbss) % 0x1000) {
 		//add a little bit more for a nice page boundary
 		int difference = (startofbss + sizeofbss + 0x1000) % 0x1000;
-		sizeofbss+=0x1000-difference;
+		sizeofbss += 0x1000 - difference;
 	}
 
-	printf("startofbss=%x\n",startofbss);
-	printf("sizeofbss=%x\n",sizeofbss);
+	printf("INF: startofbss=%x\n",startofbss);
+	printf("INF: sizeofbss=%x\n",sizeofbss);
 	//printf("FirstFreeAddress=%x\n",FirstFreeAddress);
 
 	fpVMMBIN=fopen("vmm.bin","r+");
-	if (fpVMMBIN) {
-		printf("Failed opening vmm.bin\n");
+	if (!fpVMMBIN) {
+		printf("ERR: failed opening vmm.bin\n");
 		errorcode=1;
 		goto defer;
 	}
 
-	unsigned char *buf=calloc(1,sizeofbss);
-	unsigned long long startoffreemem=startofbss+sizeofbss;
+	unsigned char *buf = calloc(1, sizeofbss);
+	unsigned long long startoffreemem = startofbss + sizeofbss;
 	int count;
-	startoffreemem+=4096-(startoffreemem % 4096);
 
-
-
+	startoffreemem += 4096 - (startoffreemem % 4096);
 	//printf("startoffreemem=%x\n",(int)startoffreemem);
 	//*(unsigned long long *)(&buf[FirstFreeAddress-startofbss])=(startoffreemem+0x9000) & 0xfffffffffffff000ULL;
 
 	//seek to the end
-	printf("Seeking to %x\n",startofbss-0x00400000);
-	if (fseek(fpVMMBIN,startofbss-0x00400000,SEEK_SET)!=-1)
-	{
-		if (count=fwrite(buf,sizeofbss,1,fpVMMBIN)<1)
-		{
-			printf("fwrite failed. Count=%d\n",count);				
+	printf("INF: seeking to %x\n",startofbss-0x00400000);
+	if (fseek(fpVMMBIN, startofbss - 0x00400000, SEEK_SET) != -1) {
+		if (count=fwrite(buf, sizeofbss, 1, fpVMMBIN) < 1) {
+			printf("ERR: fwrite failed. Count=%d\n",count);				
 			errorcode=1;
+			goto defer;
 		}
+	} else {
+		printf("ERR: seek failed\n");
+		errorcode = 1;
 	}
-	else
-	{
-		printf("Seek failed\n");
-		errorcode=1;
-	}
-
-	fclose(fpVMMBIN);
-	free(buf);
 
 defer:
+	if (fpVMMBIN) {
+		fclose(fpVMMBIN);
+	}
+	if (buf) {
+		free(buf);
+	}
 	return errorcode;
 }
