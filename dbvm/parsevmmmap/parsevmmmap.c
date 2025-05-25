@@ -45,7 +45,8 @@ int main(void) {
 	   printf("Error: EOF\n");
 	   return 1;
 	   }
-	   }*/
+	   }
+	*/
 	fclose(fpVMMMAP);
 
 	if ((startofbss+sizeofbss) % 0x1000) {
