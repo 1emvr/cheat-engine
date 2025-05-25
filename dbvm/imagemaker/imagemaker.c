@@ -8,15 +8,24 @@
 #include <unistd.h>
 #include <string.h>
 
+int img_read(unsigned char *buffer, const char *filename, int size) { // moved to separate function to change signature (probably slower).
+	FILE *fp = fopen(filename, "r");
+	buffer = malloc(size);
+	fread((void*)buffer, size, 1, fp);
+	fclose(fp);
+
+	return size;
+}
+
+void img_write();
 
 int main(void)
 {
-  FILE *fpBootloader;
-  FILE *fpVmloader;
-  FILE *fpVmm;
-  FILE *fpDisk;
-  FILE *fpFullDisk;
-  
+ // FILE *fpBootloader;
+ // FILE *fpVmloader;
+ // FILE *fpVmm;
+ FILE *fpDisk;
+ FILE *fpFullDisk;
   
   unsigned char *bootloader;
   unsigned char *vmloader;
@@ -24,7 +33,6 @@ int main(void)
   unsigned char *vmdisk;
   
   unsigned short int VMMlocation;
-
   unsigned char sector[512];
   
   int bootloader_size;
@@ -34,65 +42,65 @@ int main(void)
   int *sectornumber=(int *)sector;
   
   long fpos;
-  
   struct stat tempstat;
   
   memset(sector,0,512);
-  printf("Image being created\n");
+  printf("INF: image being created\n");
   
-  printf("Opening bin files\n");
-  printf("Opening and reading bootloader.bin...");  
-  if (stat("bootloader.bin",&tempstat)==-1)
-  {
-    printf("File can't be found\n");
+  printf("INF: opening bin files\n");
+  printf("INF: opening and reading bootloader.bin...");  
+
+  if (stat("bootloader.bin", &tempstat) == -1) {
+    printf("ERR: file can't be found\n");
     return 1;
   }
-  bootloader_size=tempstat.st_size;
-  bootloader=malloc(bootloader_size);  
-  fpBootloader=fopen("bootloader.bin","r");    
-  fread(bootloader,tempstat.st_size,1,fpBootloader);
-  printf("done\n");
+
+  //bootloader_size=tempstat.st_size;
+  //bootloader=malloc(bootloader_size);  
+  //fpBootloader=fopen("bootloader.bin","r");    
+  //fread(bootloader,tempstat.st_size,1,fpBootloader);
+  bootloader_size = img_read(bootloader, "bootloader.bin", tempstat);
+  printf("INF: done\n");
   
     
-  printf("Opening and reading vmloader.bin...");  
-  if (stat("vmloader.bin",&tempstat))
-  {
-    printf("File can't be found\n");
+  printf("INF: opening and reading vmloader.bin...");  
+  if (stat("vmloader.bin", &tempstat)) {
+    printf("ERR: file can't be found\n");
     return 1;
   }  
-  vmloader_size=tempstat.st_size;
-  vmloader=malloc(vmloader_size);  
-  fpVmloader=fopen("vmloader.bin","r");    
-  fread(vmloader,vmloader_size,1,fpVmloader);
-  printf("done\n");  
+  //vmloader_size=tempstat.st_size;
+  //vmloader=malloc(vmloader_size);  
+  //fpVmloader=fopen("vmloader.bin","r");    
+  //fread(vmloader,vmloader_size,1,fpVmloader);
+  vmloader_size = img_read(vmloader, "vmloader.bin", tempstat.st_size);
+  printf("INF: done\n");  
   
   
-  printf("Opening and reading vmm.bin...");  
-  if (stat("vmm.bin",&tempstat))
-  {
-    printf("File can't be found\n");
+  printf("INF: opening and reading vmm.bin...");  
+  if (stat("vmm.bin",&tempstat)) {
+    printf("ERR: file can't be found\n");
     return 1;
   }  
-  vmm_size=tempstat.st_size;
-  vmm=malloc(vmm_size);  
-  fpVmm=fopen("vmm.bin","r");    
-  fread(vmm,tempstat.st_size,1,fpVmm);
-  printf("done\n");
+  //vmm_size=tempstat.st_size;
+  //vmm=malloc(vmm_size);  
+  //fpVmm=fopen("vmm.bin","r");    
+  //fread(vmm,tempstat.st_size,1,fpVmm);
+  vmm_size = img_read(vmm, "vmm.bin", tempstat.st_size);
+  printf("INF: done\n");
   
-  printf("Creating vmdisk.img...\n");
-  fpDisk=fopen("vmdisk.img","w");
-  if (fpDisk==NULL)
-  {
-    printf("Failed creating file\n");
+  printf("INF: creating vmdisk.img...\n");
+  fpDisk = fopen("vmdisk.img","w");
+  if (fpDisk==NULL) {
+    printf("ERR: failed creating file\n");
     return 1;    
   }
   
-  printf("Writing VMMlocation in bootsector\n");
-  VMMlocation=2+(1+vmloader_size/512);  
-  *(unsigned short int *)&bootloader[0x8]=VMMlocation;
+  printf("INF: writing VMMlocation in bootsector\n");
+  VMMlocation = 2+(1+vmloader_size/512);  
+  *(unsigned short int *)&bootloader[0x8] = VMMlocation; // write header (?)
   
-  fwrite(bootloader,bootloader_size,1,fpDisk);
-  fwrite(vmloader,vmloader_size,1,fpDisk);
+  fwrite(bootloader, bootloader_size, 1, fpDisk);
+  fwrite(vmloader, vmloader_size, 1, fpDisk);
   
   //now seek to the VMM startsector
   fseek(fpDisk, VMMlocation*512, SEEK_SET); //go to next sector pos  
@@ -103,17 +111,16 @@ int main(void)
   fwrite(sector,512-((VMMlocation*512+vmm_size) % 512),1,fpDisk);
   
   
-  
   fclose(fpDisk);
-  fclose(fpVmm);
-  fclose(fpVmloader);
-  fclose(fpBootloader);    
+  //fclose(fpVmm);
+  //fclose(fpVmloader);
+  //fclose(fpBootloader);    
 
   //full disk image (cdrom capable)
-  printf("Reopening and reading vmdisk.img...");  
+  printf("INF: reopening and reading vmdisk.img...");  
   if (stat("vmdisk.img",&tempstat))
   {
-    printf("File can't be found\n");
+    printf("ERR: file can't be found\n");
     return 1;
   }  
   vmdisk_size=tempstat.st_size;

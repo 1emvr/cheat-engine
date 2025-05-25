@@ -126,26 +126,24 @@ UINT_PTR vmmPA;
 int initializedvmm=0;
 
 
-void cleanupMemory()
-{
-  Print(L"Free unused memory\n");
-
+// TODO: remove/change all print statements (??)
+void cleanupMemory() {
+  Print(L"INF: freeing unused memory\n");
 
   st->BootServices->FreePages(originalstate->APEntryPage,1);
   st->BootServices->FreePages((EFI_PHYSICAL_ADDRESS)enterVMM2,1);
 
   st->BootServices->FreePages(originalstatePA, 1+(sizeof(OriginalState) / 4096));
 
-  Print(L"Freed unused memory\n");
+  Print(L"INF: freed unused memory\n");
 
 }
 
-void InitializeDBVM(UINT64 vmm, int vmmsize)
-{
+void InitializeDBVM(UINT64 vmm, int vmmsize) {
   //basic paging setup for the vmm, will get expanded by the vmm itself
   PINITVARS initvars = (PINITVARS)(vmm+0x10);
 
-  UINT64 FreePA=((vmm+vmmsize) & 0xfffffffffffff00ULL) +4096;
+  UINT64 FreePA=((vmm+vmmsize) & 0xfffffffffffff00ULL) +4096; 
   UINT64 mainstack=FreePA;
   FreePA+=16*4096;
   UINT64 *GDTBase=(UINT64 *)FreePA; FreePA+=4096;
@@ -167,36 +165,34 @@ void InitializeDBVM(UINT64 vmm, int vmmsize)
 
 
 
-  Print(L"PageMapLevel4=%lx\n",PageMapLevel4);
-
-
-  Print(L"Setting up initial paging table for vmm\n");
+  Print(L"INF: PageMapLevel4=%lx\n",PageMapLevel4);
+  Print(L"INF: setting up initial paging table\n");
 
   *(PUINT_PTR)(&PageMapLevel4[0])=(UINT_PTR)PageDirPtr;
   PageMapLevel4[0].P=1;
   PageMapLevel4[0].RW=1;
 
-  Print(L"PageMapLevel4[0]=%lx\n",*(PUINT_PTR)(&PageMapLevel4[0]));
+  Print(L"INF: PageMapLevel4[0]=%lx\n",*(PUINT_PTR)(&PageMapLevel4[0]));
 
 
   *(PUINT_PTR)(&PageDirPtr[0])=(UINT_PTR)PageDir;
   PageDirPtr[0].P=1;
   PageDirPtr[0].RW=1;
-  Print(L"PageDirPtr[0]=%lx\n",*(PUINT_PTR)(&PageDirPtr[0]));
+  Print(L"INF: PageDirPtr[0]=%lx\n",*(PUINT_PTR)(&PageDirPtr[0]));
 
   *(PUINT_PTR)(&PageDir[0])=0; //physical address 0x00000000 to 0x00200000
   PageDir[0].P=1;
   PageDir[0].US=1;
   PageDir[0].RW=1;
   PageDir[0].PS=1; //2MB
-  Print(L"PageDir[0]=%lx\n",*(PUINT_PTR)(&PageDir[0]));
+  Print(L"INF: PageDir[0]=%lx\n",*(PUINT_PTR)(&PageDir[0]));
 
   *(PUINT_PTR)(&PageDir[1])=0x00200000; //physical address 0x00200000 to 0x00400000
   PageDir[1].P=1;
   PageDir[1].US=1;
   PageDir[1].RW=1;
   PageDir[1].PS=1; //2MB
-  Print(L"PageDir[1]=%lx\n",*(PUINT_PTR)(&PageDir[1]));
+  Print(L"INF: PageDir[1]=%lx\n",*(PUINT_PTR)(&PageDir[1]));
 
   {
     //create a pagetable for the first 2MB of vmm
@@ -207,7 +203,7 @@ void InitializeDBVM(UINT64 vmm, int vmmsize)
     PageDir[2].RW=1;
     PageDir[2].PS=0; //points to a pagetable
 
-    Print(L"PageDir[2]=%lx\n",*(PUINT_PTR)(&PageDir[2]));
+    Print(L"INF: PageDir[2]=%lx\n",*(PUINT_PTR)(&PageDir[2]));
 
     //fill in the pagetable
     for (i=0; i<512; i++)
@@ -264,9 +260,9 @@ void InitializeDBVM(UINT64 vmm, int vmmsize)
   NewGDTDescriptor.limit=0x6f; //111
   NewGDTDescriptor.base=0x00400000 + (UINT64)GDTBase - (UINT64)vmm; //0x00400000+vmmsize+4096; //virtual address to the gdt
 
-  Print(L"&NewGDTDescriptor=%lx, &NewGDTDescriptor.limit=%lx, &NewGDTDescriptor.base=%lx\n",(UINT64)&NewGDTDescriptor,(UINT64)&NewGDTDescriptor.limit, (UINT64)&NewGDTDescriptor.base);
-  Print(L"NewGDTDescriptor.limit=%x\n",NewGDTDescriptor.limit);
-  Print(L"NewGDTDescriptor.base=%lx\n",(UINT64)NewGDTDescriptor.base);
+  Print(L"INF: &NewGDTDescriptor=%lx, &NewGDTDescriptor.limit=%lx, &NewGDTDescriptor.base=%lx\n",(UINT64)&NewGDTDescriptor,(UINT64)&NewGDTDescriptor.limit, (UINT64)&NewGDTDescriptor.base);
+  Print(L"INF: NewGDTDescriptor.limit=%x\n",NewGDTDescriptor.limit);
+  Print(L"INF: NewGDTDescriptor.base=%lx\n",(UINT64)NewGDTDescriptor.base);
 
   NewGDTDescriptorVA=(UINT_PTR)&NewGDTDescriptor;
 
@@ -366,15 +362,11 @@ void InitializeDBVM(UINT64 vmm, int vmmsize)
     char something[201];
 
     //Input(L"Type something : ", something, 200);
-
-
-
-
     address=0xfffff;
     s=AllocatePages(AllocateMaxAddress,EfiRuntimeServicesCode, 1,&address);
-    if (s!=EFI_SUCCESS)
-    {
-      Print(L"Failure allocating under 1MB region for AP launch");
+
+    if (s!=EFI_SUCCESS) {
+      Print(L"INF: failure allocating under 1MB region for AP launch");
       return;
     }
     originalstate->APEntryPage=address;
@@ -400,15 +392,15 @@ void InitializeDBVM(UINT64 vmm, int vmmsize)
 
         if (loop>100)
         {
-          Print(L"Giving up allocating memory for MemoryMap\n");
+          Print(L"INF: giving up allocating memory for MemoryMap\n");
         }
       }
       else
-        Print(L"Failure allocating memory for MemoryMap\n");
+        Print(L"INF: failure allocating memory for MemoryMap\n");
     }
 
-    Print(L"descriptorbuffersize=%d bytes\n", descriptorbuffersize);
-    Print(L"DescriptorVersion=%d\n", DescriptorVersion);
+    Print(L"INF: descriptorbuffersize=%d bytes\n", descriptorbuffersize);
+    Print(L"INF: DescriptorVersion=%d\n", DescriptorVersion);
 
    // asm volatile (".byte 0xf1");
     /*
@@ -495,11 +487,11 @@ void LaunchDBVM()
 
    if (!initializedvmm)
    {
-     Print(L"First initialize DBVM\n");
+     Print(L"INF: first initialize DBVM\n");
      return;
    }
 
-   Print(L"Storing original state\n");
+   Print(L"INF: storing original state\n");
    originalstate->cpucount=cpucount;  //0 will indicate that dbvm needs to initialize the secondary CPU's
    //Print(L"originalstate->cpucount=%d",originalstate->cpucount);
 
@@ -625,12 +617,7 @@ void LaunchDBVM()
     originalstate->rip=(UINT_PTR)enterVMMEpilogue; //enterVMMEpilogue is an address inside the entervmmprologue function
 
     //Print(L"originalstate->rip=%lx\n",originalstate->rip);
-
-
-
-
-
-    Print(L"Calling entervmm2. (Originalstate=%lx (%lx))\n",originalstate,originalstatePA);
+    Print(L"INF: calling entervmm2. (Originalstate=%lx (%lx))\n",originalstate,originalstatePA);
 
     //call to entervmmprologue, pushes the return value on the stack
 
@@ -642,7 +629,7 @@ void LaunchDBVM()
     enableInterrupts();
 
 
-    Print(L"\nReturned from enterVMMPrologue\n");
+    Print(L"\nINF: returned from enterVMMPrologue\n");
 
 
     //return;
@@ -651,7 +638,7 @@ void LaunchDBVM()
     if (1)
     {
 
-      Print(L"Testing:\n");
+      Print(L"INF: testing:\n");
       struct
       {
         unsigned int structsize;
@@ -661,7 +648,7 @@ void LaunchDBVM()
 
       ZeroMem(&vmcallinfo, sizeof(vmcallinfo));
 
-      Print(L"&vmcallinfo=%lx\n", &vmcallinfo);
+      Print(L"INF: &vmcallinfo=%lx\n", &vmcallinfo);
 
       vmcallinfo.structsize=sizeof(vmcallinfo);
       vmcallinfo.level2pass=0xfedcba98;
@@ -678,21 +665,21 @@ void LaunchDBVM()
 
 
 
-      Print(L"Doing system test.  Before DR6=%x DR7=%x\n", getDR6(), getDR7());
+      Print(L"INF: doing system test.  Before DR6=%x DR7=%x\n", getDR6(), getDR7());
 
       disableInterrupts();
       r=doSystemTest(); //check if the system behaves like it should
       enableInterrupts();
 
-      Print(L"After system test.  After DR6=%x DR7=%x\n", getDR6(), getDR7());
+      Print(L"INF: after system test.  After DR6=%x DR7=%x\n", getDR6(), getDR7());
 
       if (r)
       {
-        Print(L"Failed to pass test %d\n", r);
+        Print(L"ERR: failed to pass test %d\n", r);
       }
       else
       {
-        Print(L"System Test Successful\n", r);
+        Print(L"INF: system test successful\n", r);
 
       }
 
@@ -706,9 +693,7 @@ void LaunchDBVM()
 
 
 
-      Print(L"still alive\ndbvmversion=%x\nfreemem=%d (fullpages=%d)", dbvmversion, freemem, fullpages);
-
-
+      Print(L"INF: still alive\ndbvmversion=%x\nfreemem=%d (fullpages=%d)", dbvmversion, freemem, fullpages);
     }
 
     //DbgPrint("cpunr=%d\n",cpunr());

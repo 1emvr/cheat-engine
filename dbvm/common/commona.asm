@@ -36,6 +36,9 @@ push ebx
 push ecx
 push edx
 
+; obtain the 4 arguments from the stack at 8+ and derefernce them (cpuid(&a, &b, &c, &d)).
+; CPUID returns processor identification and feature information in the EAX, EBX, ECX, and EDX registers. 
+; The instruction’s output is dependent on the contents of the EAX register upon execution (in some cases, ECX as well).
 mov eax,[ebp+8]
 mov eax,[eax]
 mov ebx,[ebp+12]
@@ -71,7 +74,7 @@ pop ebp
 ret ;16
 
 ;---------------------------;
-;void spinlock(int *lockvar);
+;void spinlock(int *lockvar); // spin this thread forever until the lock is released
 ;---------------------------;
 global spinlock
 spinlock:
@@ -79,14 +82,14 @@ push ebp
 mov ebp,esp
 
 push ebx
-mov ebx,[ebp+8] ;ebx now contains the address of the lock
+mov ebx,[ebp+8] ;ebx now contains the address of the lock (spinlock(&a)))
 
 spinlock_loop:
 ;serialize
 pushad
 xor eax,eax
 cpuid ;serialize
-popad
+popad ;pop stack values to all the GP registers
 
 ;check lock
 cmp dword [ebx],0
@@ -101,13 +104,12 @@ cmp eax,0 ;test if successful
 jne spinlock_loop
 
 pop ebx
-
 pop ebp
 ret ;4
 
 
 ;-----------------------------------------;
-;void outportb(short int port, char value);
+;void outportb(short int port, char value); // I/O port writer
 ;-----------------------------------------;
 global outportb
 outportb:

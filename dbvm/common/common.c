@@ -825,9 +825,9 @@ int generateCRC(unsigned char *ptr, int size)
 void showstatec(ULONG *stack)
 /* send the state of the registers to the serial port */
 {
-  sendstringf("idtbase=%8 gdtbase=%8\n\r",stack[0],stack[1]);
-  sendstringf("cr3=%8 cr2=%8 cr1=%8 cr0=%8\n\r",stack[2],stack[3],stack[4],stack[5]);
-  sendstringf("eflags=%8\n\r",stack[6]);
+  sendstringf("INF: idtbase=%8 gdtbase=%8\n\r",stack[0],stack[1]);
+  sendstringf("INF: cr3=%8 cr2=%8 cr1=%8 cr0=%8\n\r",stack[2],stack[3],stack[4],stack[5]);
+  sendstringf("INF: eflags=%8\n\r",stack[6]);
 
 
   /*
