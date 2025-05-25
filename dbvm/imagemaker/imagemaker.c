@@ -97,7 +97,7 @@ int main(void)
   
   printf("INF: writing VMMlocation in bootsector\n");
   VMMlocation = 2+(1+vmloader_size/512);  
-  *(unsigned short int *)&bootloader[0x8] = VMMlocation; // write header (?)
+  *(unsigned short int *)&bootloader[0x8] = VMMlocation; // write address to header (?)
   
   fwrite(bootloader, bootloader_size, 1, fpDisk);
   fwrite(vmloader, vmloader_size, 1, fpDisk);
