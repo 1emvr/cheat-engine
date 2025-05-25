@@ -19,6 +19,7 @@ int main(void) {
 	unsigned int sizeofbss;
 	unsigned int memorylist = 0;
 
+	// NOTE: breaking apart statements probably won't change the signature.
 	fpVMLOADERMAP = fopen("vmloader.map", "r"); 
 	if (!fpVMLOADERMAP) {
 		errorcode = 1;
@@ -54,7 +55,7 @@ int main(void) {
 
 	//seek to the end
 	printf("INF: seeking to %x\n", startofbss - 0x30000);
-	if (fseek(fpVMLOADERBIN,startofbss-0x30000,SEEK_SET)!=-1) {
+	if (fseek(fpVMLOADERBIN, startofbss - 0x30000, SEEK_SET) != -1) {
 		if (count = fwrite(buf, sizeofbss, 1, fpVMLOADERBIN) < 1) {
 			printf("ERR: fwrite failed. Count=%d\n",count);				
 			errorcode=1;
