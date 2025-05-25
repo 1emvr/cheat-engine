@@ -3,6 +3,7 @@
 ;location possible, and setup the system to protected and paged mode
 
 BITS 16
+
 GLOBAL amain
 amain:
 
@@ -283,10 +284,10 @@ global NumberOfCylinders
 NumberOfCylinders: 	dd 0
 
 vesa_info_success:
-  db "get VESA info success",13,10,"$"
+  db "INF: get VESA info success",13,10,"$"
 
 vesa_info_fail:
-  db "get VESA info failed",13,10,"$"
+  db "ERR: get VESA info failed",13,10,"$"
 
 str_failed_getting_data:
   db "   Failure"
