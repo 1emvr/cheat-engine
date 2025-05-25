@@ -17,10 +17,7 @@ int img_read(unsigned char *buffer, const char *filename, int size) { // moved t
 	return size;
 }
 
-void img_write();
-
-int main(void)
-{
+int main(void) {
  // FILE *fpBootloader;
  // FILE *fpVmloader;
  // FILE *fpVmm;
@@ -133,8 +130,8 @@ int main(void)
   fseek(fpFullDisk, 1474559, SEEK_SET);
   fwrite(sector, 1, 1, fpFullDisk);
   
-  printf("done\n");
-  printf("Completed\n");
+  printf("INF: done\n");
+  printf("INF: completed\n");
 
   return 0;  
 }
