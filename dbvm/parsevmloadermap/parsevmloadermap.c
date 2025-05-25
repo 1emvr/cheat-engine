@@ -19,7 +19,7 @@ int main(void) {
 	unsigned int sizeofbss;
 	unsigned int memorylist = 0;
 
-	// NOTE: breaking apart statements probably won't change the signature.
+	// NOTE: breaking apart statements probably won't change the signature but makes it more readable.
 	fpVMLOADERMAP = fopen("vmloader.map", "r"); 
 	if (!fpVMLOADERMAP) {
 		errorcode = 1;
