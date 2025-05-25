@@ -59,7 +59,7 @@ int main(void)
   //bootloader=malloc(bootloader_size);  
   //fpBootloader=fopen("bootloader.bin","r");    
   //fread(bootloader,tempstat.st_size,1,fpBootloader);
-  bootloader_size = img_read(bootloader, "bootloader.bin", tempstat);
+  bootloader_size = img_read(bootloader, "bootloader.bin", tempstat.st_size);
   printf("INF: done\n");
   
     
@@ -107,36 +107,34 @@ int main(void)
   fwrite(vmm,vmm_size,1,fpDisk);
   
   //fill till dividable by 512
-  bzero(sector,512);
-  fwrite(sector,512-((VMMlocation*512+vmm_size) % 512),1,fpDisk);
-  
-  
+  bzero(sector, 512);
+  fwrite(sector, 512 - ((VMMlocation*512+vmm_size) % 512), 1, fpDisk);
   fclose(fpDisk);
+
   //fclose(fpVmm);
   //fclose(fpVmloader);
   //fclose(fpBootloader);    
 
   //full disk image (cdrom capable)
   printf("INF: reopening and reading vmdisk.img...");  
-  if (stat("vmdisk.img",&tempstat))
-  {
+  if (stat("vmdisk.img",&tempstat)) {
     printf("ERR: file can't be found\n");
     return 1;
   }  
-  vmdisk_size=tempstat.st_size;
-  vmdisk=malloc(vmdisk_size);  
+  vmdisk_size = tempstat.st_size;
+  vmdisk = malloc(vmdisk_size);  
     
-  fpDisk=fopen("vmdisk.img","r");
-  fpFullDisk=fopen("vmdisk144.img","w");
+  fpDisk = fopen("vmdisk.img","r");
+  fpFullDisk = fopen("vmdisk144.img","w");
   
-  fread(vmdisk,vmdisk_size,1,fpDisk);
-  fwrite(vmdisk,vmdisk_size,1,fpFullDisk);  
+  fread(vmdisk, vmdisk_size, 1, fpDisk);
+  fwrite(vmdisk, vmdisk_size, 1, fpFullDisk);  
   
   fseek(fpFullDisk, 1474559, SEEK_SET);
-  fwrite(sector,1,1,fpFullDisk);
+  fwrite(sector, 1, 1, fpFullDisk);
   
   printf("done\n");
-  
   printf("Completed\n");
+
   return 0;  
 }
