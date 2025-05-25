@@ -117,7 +117,7 @@ void startNextCPU(void)
 
   nextstack=(QWORD)nextstack+(4096*16)-16;
 
-  sendstringf("startNextCPU. nextstack=%6\n", nextstack);
+  sendstringf("INF: startNextCPU. nextstack = %6\n", nextstack);
 
   asm volatile ("": : :"memory");
   initcs=0; //let the next cpu pass
@@ -129,9 +129,9 @@ void CheckCRCValues(void)
 {
   unsigned int newcrc;
 
-  sendstringf("Original VMM crc = %x\n\r",originalVMMcrc);
+  sendstringf("INF: original VMM crc = %x\n\r",originalVMMcrc);
   newcrc=generateCRC((void *)vmxloop,0x2a000);
-  sendstringf("Current  VMM crc = %x\n\r",newcrc);
+  sendstringf("INF: current  VMM crc = %x\n\r",newcrc);
   if (originalVMMcrc!=newcrc)
   {
     sendstring("!!!!!!!!!!MISMATCH!!!!!!!!!!\n\r");
