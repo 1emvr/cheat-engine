@@ -153,20 +153,16 @@ typedef unsigned __int8		uint8_t;
  * These functions can read from the stream safely!
  * Swap endianity of input to little endian.
  */
-_INLINE_ int16_t RSHORT(const uint8_t *s)
-{
+_INLINE_ int16_t RSHORT(const uint8_t *s) {
 	return s[0] | (s[1] << 8);
 }
-_INLINE_ uint16_t RUSHORT(const uint8_t *s)
-{
+_INLINE_ uint16_t RUSHORT(const uint8_t *s) {
 	return s[0] | (s[1] << 8);
 }
-_INLINE_ int32_t RLONG(const uint8_t *s)
-{
+_INLINE_ int32_t RLONG(const uint8_t *s) {
 	return s[0] | (s[1] << 8) | (s[2] << 16) | (s[3] << 24);
 }
-_INLINE_ uint32_t RULONG(const uint8_t *s)
-{
+_INLINE_ uint32_t RULONG(const uint8_t *s) {
 	return s[0] | (s[1] << 8) | (s[2] << 16) | (s[3] << 24);
 }
 #else
