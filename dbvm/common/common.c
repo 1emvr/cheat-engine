@@ -11,621 +11,490 @@ edit: yeah, not vmm anymore as it's 64-bit, so vmloader only
 criticalSection sendstringfCS;
 criticalSection sendstringCS;
 
-int vbuildstring(char *str, int size, char *string, __builtin_va_list arglist)
-{
-  unsigned char varlist[64];
-  char temps[100];
-  char workstring[strlen(string)];
-  int i,_i,l,strpos,vlc;
+int vbuildstring(char *str, int size, char *string, __builtin_va_list arglist) {
+	unsigned char varlist[64];
+	char temps[100];
+	char workstring[strlen(string)];
 
-  l=strlen(string);
-  vlc=0;
+	if (size == 0) {
+		return 0;
+	}
+	int i = 0, _i = 0, strpos = 0, vlc = 0;
+	int l = strlen(string);
 
-  if (size==0)
-    return 0;
+	// work on the copy of string, not the original
+	for (i = 0; i < strlen(string); i++) {
+		workstring[i]=string[i];
+	}
 
-  strpos=0;
+	zeromemory(varlist, 64);
 
-  // work on the copy of string, not the original
-  for (i=0; i<strlen(string); i++)
-    workstring[i]=string[i];
+	for (i = 0; i < 64; i++) {
+		varlist[i] = 255;
+	}
 
-  zeromemory(varlist,64);
+	// parse the string for known operators
+	for (i = 0; i < l; i++) {
+		if (workstring[i] == '%') {
+			workstring[i] = 0;
+		}
+		if (workstring[i + 1] == 'd') { varlist[vlc] = 0; } 
+		else if (workstring[i + 1] == 'x') { varlist[vlc] = 1; } 
+		else if (workstring[i + 1] == '8') { varlist[vlc] = 3; } 
+		else if (workstring[i + 1] == 'p') { varlist[vlc] = 3; } 
+		else if (workstring[i + 1] == '6') { varlist[vlc] = 4; } 
+		else if (workstring[i + 1] == '2') { varlist[vlc] = 6; } 
+		else if (workstring[i + 1] == 's') { varlist[vlc] = 2; } 
+		else if (workstring[i + 1] == 'c') { varlist[vlc] = 5; }
 
-  for (i=0; i<64; i++)
-    varlist[i]=255;
+		workstring[i + 1] = 0;
+		vlc++;
+	}
 
+	i = 0;
+	vlc = 0;
 
-  // parse the string for known operators
-  for (i=0; i<l; i++)
-  {
-    if (workstring[i]=='%')
-    {
-      workstring[i]=0;
+	while ((i < l) && (strpos < size)) {
+		if (workstring[i] == 0) {
+			if (varlist[vlc] == 255) {
+				printstring("UNDEFINED VARLIST", 60, 22, 2, 4);
+				while (1);
+			}
 
-      if (workstring[i+1]=='d') //decimal
-      {
-        varlist[vlc]=0;
-      }
-      else
-      if (workstring[i+1]=='x') //hex
-      {
-        varlist[vlc]=1;
-      }
-      else
-      if (workstring[i+1]=='8') //8 char hex (%8)
-      {
-        varlist[vlc]=3;
-      }
-      else
-      if (workstring[i+1]=='p') //8 char hex (%8)
-      {
-        varlist[vlc]=3;
-      }
-      else
-      if (workstring[i+1]=='6') //16 char hex (%8)
-      {
-        varlist[vlc]=4;
-      }
-      else
-      if (workstring[i+1]=='2') //2 char hex (%2)
-      {
-        varlist[vlc]=6;
-      }
-      else
-      if (workstring[i+1]=='s') //string
-      {
-        varlist[vlc]=2;
-      }
-      else
-      if (workstring[i+1]=='c') //char
-      {
-        varlist[vlc]=5;
-      }
+			switch (varlist[vlc]) {
+				case 0: //decimal
+					{
+						unsigned int x = __builtin_va_arg(arglist, unsigned int);
+						itoa(x, 10, temps, 100);
+						_i = strlen(temps);
 
-      workstring[i+1]=0;
-      vlc++;
-    }
-  }
+						if (strpos + _i >= size) {
+							_i = size - (strpos + _i - size);
+						}
+						copymem(&str[strpos], temps, _i);
+						strpos += _i;
+						break;
+					}
 
-  i=0;
-  vlc=0;
+				case 1: //hex
+					{
+						unsigned int x = __builtin_va_arg(arglist, unsigned int);
+						itoa(_i, 16, temps, 100);
+						_i=strlen(temps);
 
+						if (strpos + _i >= size) {
+							_i = size - (strpos + _i - size);
+						}
+						copymem(&str[strpos], temps, _i);
+						strpos+=_i;
+						break;
+					}
 
-  while ((i<l) && (strpos<size))
-  {
-    if (workstring[i]==0)
-    {
-      if (varlist[vlc]==255)
-      {
-        printstring("UNDEFINED VARLIST",60,22,2,4);
-        while (1);
-      }
+				case 3: //%8, DWORD
+					{
+						unsigned int x = __builtin_va_arg(arglist, unsigned int);
+						itoa(x, 16, temps, 100);
+						appendzero(temps, 8, 100);
+						_i = strlen(temps);
 
-      switch (varlist[vlc])
-      {
-        case 0: //decimal
-        {
-          unsigned int x;
-          x=__builtin_va_arg(arglist,unsigned int);
-          itoa(x,10,temps,100);
+						if (strpos + _i >= size) {
+							_i = size - (strpos + _i - size);
+						}
+						copymem(&str[strpos], temps, _i);
+						strpos += _i;
+						break;
+					}
 
-          _i=strlen(temps);
-          if (strpos+_i>=size)
-            _i=size-(strpos+_i-size);
+				case 6: //%2, char
+					{
+						unsigned char x = __builtin_va_arg(arglist, int);
+						itoa(x,16, temps, 100);
+						appendzero(temps, 2, 100);
+						_i = strlen(temps);
 
-          copymem(&str[strpos],temps,_i);
-          strpos+=_i;
-          break;
-        }
+						if (strpos + _i >= size) {
+							_i = size - (strpos + _i-size);
+						}
+						copymem(&str[strpos], temps, _i);
+						strpos += _i;
+						break;
+					}
 
-        case 1: //hex
-        {
-          unsigned int x;
-          x=__builtin_va_arg(arglist,unsigned int);
-          itoa(_i,16,temps,100);
+				case 255:
+					{
+						printstring("UNDEFINED VARLIST", 40, 21, 2, 4);
+						/*printstring(string,40,22,2,4);
+						  printstring(temps,40,23,2,4);
+						  printstring(str,40,24,2,4);*/
 
-          _i=strlen(temps);
-          if (strpos+_i>=size)
-            _i=size-(strpos+_i-size);
+						if (strpos >= size) {
+							strpos = size - 1;
+						}
+						str[strpos] = 0;
 
-          copymem(&str[strpos],temps,_i);
-          strpos+=_i;
-
-          break;
-        }
-
-        case 3: //%8, DWORD
-        {
-          unsigned int x;
-          x=__builtin_va_arg(arglist,unsigned int);
-          itoa(x,16,temps,100);
-
-          appendzero(temps,8,100);
-
-          _i=strlen(temps);
-          if (strpos+_i>=size)
-            _i=size-(strpos+_i-size);
-
-          copymem(&str[strpos],temps,_i);
-          strpos+=_i;
-          break;
-        }
-
-        case 6: //%2, char
-        {
-
-          unsigned char x;
-          x=__builtin_va_arg(arglist,int);
+						return strpos;
+						break;
+					}
+			}
 
 
-          itoa(x,16,temps,100);
-          appendzero(temps,2,100);
+			if (varlist[vlc] == 2) { //string
+				char *s = __builtin_va_arg(arglist, char *);
+				_i = strlen(s);
 
-          _i=strlen(temps);
+				if (strpos + _i > size) {
+					_i = size - (strpos + _i - size);
+				}
 
-          if (strpos+_i>=size)
-            _i=size-(strpos+_i-size);
+				copymem(&str[strpos], s, _i);
+				strpos += _i;
+			}
 
-          copymem(&str[strpos],temps,_i);
-          strpos+=_i;
-          break;
-        }
+			if (varlist[vlc] == 4) { //16 char hex
+				unsigned long long i = __builtin_va_arg(arglist, unsigned long long);
+				unsigned int p1 = i;
+				unsigned int p2 = (unsigned long long)(i >> 32);
 
-        case 255:
-          printstring("UNDEFINED VARLIST",40,21,2,4);
-          /*printstring(string,40,22,2,4);
-          printstring(temps,40,23,2,4);
-          printstring(str,40,24,2,4);*/\
+				itoa(p2, 16, temps, 100);
+				appendzero(temps, 8, 100);
+				_i = 8;
 
-          if (strpos>=size)
-            strpos=size-1;
+				if (strpos + _i > size) {
+					_i = size - (strpos + _i - size);
+				}
+				copymem(&str[strpos], temps, _i);
+				strpos += _i;
 
-          str[strpos]=0;
+				if (strpos >= size) {
+					str[size - 1] = 0;
+					return size; //enough
+				}
 
-          return strpos;
-          break;
+				itoa(p1, 16, temps, 100);
+				appendzero(temps, 8, 100);
 
-      }
+				_i = 8;
+				if (strpos + _i > size) {
+					_i = size - (strpos + _i - size);
+				}
 
+				copymem(&str[strpos], temps, _i);
+				strpos += _i;
+			}
 
-      if (varlist[vlc]==2) //string
-      {
-        char *s=__builtin_va_arg(arglist,char *);
+			if (varlist[vlc] == 5) { //char
+				int c = __builtin_va_arg(arglist, int);
 
-        _i=strlen(s);
-        if (strpos+_i>size)
-          _i=size-(strpos+_i-size);
+				str[strpos] = (char)c;
+				strpos++;
+			}
 
-        copymem(&str[strpos],s,_i);
-        strpos+=_i;
+			i += 2;
+			vlc++; //next paramtype
+			continue;
+		} else {
+			//else a normal char
+			str[strpos] = workstring[i];
+			strpos++;
 
+			if (strpos>=size) {
+				str[size - 1] = 0;
+				return size; //enough
+			}
+			i++;
+		}
+	}
 
-      }
-
-      if (varlist[vlc]==4) //16 char hex
-      {
-        unsigned long long i=__builtin_va_arg(arglist,unsigned long long);
-        unsigned int p1=i;
-        unsigned int p2=(unsigned long long)(i>>32);
-
-        itoa(p2,16,temps,100);
-        appendzero(temps,8,100);
-
-        _i=8;
-        if (strpos+_i>size)
-          _i=size-(strpos+_i-size);
-
-        copymem(&str[strpos],temps,_i);
-        strpos+=_i;
-
-        if (strpos>=size)
-        {
-          str[size-1]=0;
-          return size; //enough
-        }
-
-        itoa(p1,16,temps,100);
-        appendzero(temps,8,100);
-
-        _i=8;
-        if (strpos+_i>size)
-          _i=size-(strpos+_i-size);
-
-        copymem(&str[strpos],temps,_i);
-        strpos+=_i;
-
-      }
-
-      if (varlist[vlc]==5) //char
-      {
-        int c=__builtin_va_arg(arglist,int);
-
-        str[strpos]=(char)c;
-        strpos++;
-
-      }
-
-      i+=2;
-      vlc++; //next paramtype
-      continue;
-    }
-    else
-    {
-      //else a normal char
-      str[strpos]=workstring[i];
-      strpos++;
-
-      if (strpos>=size)
-      {
-        str[size-1]=0;
-        return size; //enough
-      }
-      i++;
-    }
-
-  }
+	if (strpos >= size) {
+		strpos = size - 1;
+	}
 
 
-
-  if (strpos>=size)
-    strpos=size-1;
-
-
-  str[strpos]=0;
-  return strpos;
+	str[strpos] = 0;
+	return strpos;
 }
 
-void sendstring(char *s)
-{
+void sendstring(char *s) {
+	csEnter(&sendstringCS);
 
-  int i;
-
-  csEnter(&sendstringCS);
-
-  for (i=0; s[i] ; i++)
-    sendchar(s[i]);
-
-  csLeave(&sendstringCS);
-
+	for (int i = 0; s[i] ;i++) {
+		sendchar(s[i]);
+	}
+	csLeave(&sendstringCS);
 }
 
-void sendstringf(char *string, ...)
-{
-  __builtin_va_list arglist;
-  char temps[200];
-  int sl,i;
+void sendstringf(char *string, ...) {
+	__builtin_va_list arglist;
+	char temps[200];
 
-  __builtin_va_start(arglist,string);
-  sl=vbuildstring(temps,200,string,arglist);
-  __builtin_va_end(arglist);
+	__builtin_va_start(arglist, string);
+	int sl = vbuildstring(temps, 200, string, arglist);
+	__builtin_va_end(arglist);
 
-  csEnter(&sendstringfCS);
-  csEnter(&sendstringCS);
+	csEnter(&sendstringfCS);
+	csEnter(&sendstringCS);
 
-  if (sl>0)
-  {
-    for (i=0; i<sl; i++)
-      sendchar(temps[i]);
-  }
+	if (sl > 0) {
+		for (int i = 0; i < sl; i++) {
+			sendchar(temps[i]);
+		}
+	}
+	csLeave(&sendstringCS);
+	csLeave(&sendstringfCS);
 
-  csLeave(&sendstringCS);
-  csLeave(&sendstringfCS);
-  return;
+	return;
 }
 
-int getAPICID(void)
-{
-  unsigned int a,b,c,d;
-  a=1;
-  _cpuid(&a,&b,&c,&d);
+int getAPICID(void) {
+	unsigned int a = 1, b = 0, c = 0, d = 0;
 
-  return (b >> 24)+1;
+	_cpuid(&a, &b, &c, &d);
+	return (b >> 24) + 1;
 }
 
-void csEnter(PcriticalSection CS)
-{
-  int apicid=getAPICID()+1; //+1 so it never returns 0
+void csEnter(PcriticalSection CS) {
+	int apicid = getAPICID() + 1; //+1 so it never returns 0
 
+	//get current apicid (from cpuid)
+	if ((CS->locked) && (CS->apicid == apicid)) {
+		//already locked but the locker is this cpu, so allow, just increase lockcount
+		CS->lockcount++;
+		return;
+	}
+	spinlock(&(CS->locked)); //sets CS->locked to 1
 
-  //get current apicid (from cpuid)
-
-  if ((CS->locked) && (CS->apicid==apicid))
-  {
-    //already locked but the locker is this cpu, so allow, just increase lockcount
-    CS->lockcount++;
-    return;
-  }
-
-  spinlock(&(CS->locked)); //sets CS->locked to 1
-
-  //here so the lock is aquired and locked is 1
-  CS->lockcount=1;
-  CS->apicid=apicid;
+	//here so the lock is aquired and locked is 1
+	CS->lockcount = 1;
+	CS->apicid = apicid;
 }
 
-void csLeave(PcriticalSection CS)
-{
-  int apicid=getAPICID()+1; //+1 so it never returns 0
+void csLeave(PcriticalSection CS) {
+	int apicid = getAPICID() + 1; //+1 so it never returns 0
 
-  if ((CS->locked) && (CS->apicid==apicid))
-  {
-    CS->lockcount--;
-    if (CS->lockcount==0)
-    {
-      //unlock
-      CS->apicid=-1; //set to a invalid apicid
-      CS->locked=0;
-    }
-  }
+	if ((CS->locked) && (CS->apicid == apicid)) {
+		CS->lockcount--;
+		if (CS->lockcount == 0) {
+			//unlock
+			CS->apicid = -1; //set to a invalid apicid
+			CS->locked = 0;
+		}
+	}
 }
 
-void zeromemory(void *address, unsigned int size)
-{
-  unsigned int i;
-  volatile unsigned char *a=(volatile unsigned char *)address;
-  for (i=0; i < size; i++)
-    a[i]=0;
+void zeromemory(void *address, unsigned int size) {
+	volatile unsigned char *a = (volatile unsigned char*)address;
+	for (int i = 0; i < size; i++) {
+		a[i]=0;
+	}
 }
 
-int debugzeromem=0;
-void zeromemoryd(void *address, unsigned int size)
-{
-  unsigned int i;
-  volatile unsigned char *a=(volatile unsigned char *)address;
-  for (i=0; i < size; i++)
-  {
-    if ((debugzeromem) && ((i%0x1000)==0))
-    {
-      sendstringf("i=%x\n", i);
-    }
-
-    a[i]=0;
-  }
+int debugzeromem = 0;
+void zeromemoryd(void *address, unsigned int size) {
+	volatile unsigned char *a = (volatile unsigned char*)address;
+	for (int i = 0; i < size; i++) {
+		if ((debugzeromem) && ((i % 0x1000) == 0)) {
+			sendstringf("i=%x\n", i);
+		}
+		a[i] = 0;
+	}
 }
 
+void copymem(void *dest, void *src,int size) {
+	unsigned char *d = dest, *s = src;
 
-void copymem(void *dest, void *src,int size)
-{
-  int i;
-  unsigned char *d=dest,*s=src;
-
-  for (i=0; i<size; i++)
-    d[i]=s[i];
+	for (int i = 0; i < size; i++) {
+		d[i] = s[i];
+	}
 }
 
-unsigned int strlen(char *string)
-{
-  int length=0;
+unsigned int strlen(char *string) {
+	int length = 0;
 
-	for (length=0; string[length]; length++) ;
-  return length;
+	for (length = 0; string[length]; length++);
+	return length;
 }
 
-char* strcat(char *dest, char *src)
-{
-  int i,j=strlen(dest);
-  for (i=0; src[i] ; i++,j++)
-    dest[j]=src[i];
+char* strcat(char *dest, char *src) {
+	int j = strlen(dest);
 
-  dest[j]=0;
+	for (int i = 0; src[i]; i++,j++) {
+		dest[j] = src[i];
+	}
 
-  return dest;
+	dest[j] = 0;
+	return dest;
 }
 
-char* strcpy(char *dest, char *src)
-{
-  int i=strlen(src);
-  int j;
-  for (j=0; j<i; j++)
-    dest[j]=src[j];
+char* strcpy(char *dest, char *src) {
+	int i = strlen(src);
 
-  dest[i]=0;
-  return dest;
+	for (int j = 0; j < i; j++) {
+		dest[j] = src[j];
+	}
+
+	dest[i] = 0;
+	return dest;
 }
 
-void appendzero(char *string, int wantedsize,int maxstringsize)
-{
-/* basicly to be used after itoa */
-  int i=0;
-  int zerostoadd=wantedsize-strlen(string);
-  char newstring[wantedsize+1];
+void appendzero(char *string, int wantedsize,int maxstringsize) {
+	/* basicly to be used after itoa */
+	int zerostoadd = wantedsize - strlen(string);
+	char newstring[wantedsize + 1];
 
-  if ((zerostoadd+strlen(string))>=maxstringsize)
-    return; //not enough memory
+	if ((zerostoadd + strlen(string)) >= maxstringsize) {
+		return; //not enough memory
+	}
 
+	for (int i=0; i<zerostoadd; i++) {
+		newstring[i] = '0';
+	}
+	newstring[zerostoadd] = 0;
+	newstring[wantedsize] = 0;
 
-  for (i=0; i<zerostoadd; i++)
-    newstring[i]='0';
+	strcat(newstring, string);
+	strcpy(string, newstring);
 
-
-  newstring[zerostoadd]=0;
-  newstring[wantedsize]=0;
-
-  strcat(newstring,string);
-  strcpy(string,newstring);
-
-  string[maxstringsize-1]=0;
+	string[maxstringsize-1] = 0;
 }
 
-unsigned int power(unsigned int x,unsigned int y)
-{
-	int i;
-	unsigned int result=1;
+unsigned int power(unsigned int x,unsigned int y) {
+	unsigned int result = 1;
 
-	if (y==0)
-		result=1;
-
-	for (i=0; i<y; i++)
-		result*=x;
-
+	if (y == 0) {
+		result = 1;
+	}
+	for (int i = 0; i < y; i++) {
+		result *= x;
+	}
 	return result;
 }
 
-unsigned int atoi(char* input, int base, int *err)
-{
-	int i,j=0,start=0;
-  unsigned char c;
-	unsigned int result=0;
-	int negative=0;
+unsigned int atoi(char* input, int base, int *err) {
+	int i = 0, j = 0, start = 0;
+  unsigned char c = 0;
+	unsigned int result = 0;
+	int negative = 0;
 
 	//parse the string according to the used base
-	if (base<2)
-	{
-		if (err)
-			*err=-1;
-    return 0;
+	if (base < 2) {
+		if (err) { *err = -1; }
+		return 0;
 	}
 
-	if (base>36)
-	{
-		if (err)
-			*err=-1;
+	if (base > 36) {
+		if (err) { *err=-1; }		
 		return 0;
 	}
 
   //some override checks
 	//if it starts with 0x or $ make it base16 and set start to 2 or 1 respectivly
-	while (input[start])
-	{
-		if (input[start]=='-')
-		{
-			negative=!negative;
-      start++;
-		}
-		else
-		if (input[start]=='$')
-		{
-			base=16;
+	while (input[start]) {
+		if (input[start] == '-') {
+			negative = !negative;
 			start++;
-		}
-		else
-		if ((input[start]=='0') && (input[start+1]=='x'))
-		{
-			base=16;
-			start+=2;
-		}
-		else
+		} else if (input[start] == '$') {
+			base = 16;
+			start++;
+		} else if ((input[start] == '0') && (input[start + 1] == 'x')) {
+			base = 16;
+			start += 2;
+		} else {
 			break; //nothing to parse
+		}
 	}
 
-
-	for (i=strlen(input)-1; i>=start ; i--,j++)
-  {
-    if ((input[i] >='0') && (input[i] <= '9')) //check if it's in the range of 0 to 9
-      c=input[i]-'0';
-		else
-    if ((input[i] >='a') && (input[i] <= 'z')) //check if it's in the range of 0 to 9
-      c=10+input[i]-'a';
-		else
-    if ((input[i] >='A') && (input[i] <= 'Z')) //check if it's in the range of 0 to 9
-      c=10+input[i]-'A';
-		else
-		{
-			if (err)
-				*err=i; //not a valid character
-			return result;
+	for (i = strlen(input) - 1; i >= start; i--, j++) {
+		if ((input[i] >='0') && (input[i] <= '9')) { //check if it's in the range of 0 to 9
+			c = input[i] - '0';
+		} else if ((input[i] >='a') && (input[i] <= 'z')) { //check if it's in the range of 0 to 9
+			c = 10 + input[i] - 'a';
+		} else if ((input[i] >= 'A') && (input[i] <= 'Z')) {//check if it's in the range of 0 to 9
+			c = 10 + input[i] - 'A';
+		} else {
+			if (err) { 
+				*err = i; //not a valid character
+				return result;
+			}
 		}
-
-		if (c>=base)
-		{
-			if (err)
-				*err=i; //not a valid character
-			return result;
+		if (c >= base) {
+			if (err) {
+				*err = i; //not a valid character
+				return result;
+			}
 		}
 
 		/* c now contains the value in numerical state, now adjust it for i and the base given) */
-		result=result+c*(power(base,j));
-
-		if (negative)
-			result=(int)(-result);
+		result = result + c * (power(base, j));
+		if (negative) {
+			result = (int)(-result);
+		}
 	}
 
-	if (err)
-		*err=0;
+	if (err) { *err = 0; }
 	return result;
 }
 
-int itoa(unsigned int value,int base, char *output,int maxsize)
+int itoa(unsigned int value,int base, char *output,int maxsize) {
 /* base: 10=decimal, 16=hexadecimal, 8 = octal, 2=binary , 1=youraloser, 0=diebitch */
-{
   char tempbuf[maxsize]; /* will get the string but in reverse */
-  int i,j,t;
+  int i = 0, j = 0, t = 0;
 
-	if (base<2)
-    return -1;
+	if (base < 2) { return -1; }
+	if (base > 36) { return -1; }
 
-	if (base>36)
-		return -1;
-
-  if (value==0 && maxsize>1)
-	{
-    output[0]='0';
-		output[1]=0;
-	  return 2;
+	if (value==0 && maxsize>1) {
+		output[0] = '0';
+		output[1] = 0;
+		return 2;
 	}
+	for (i = 0; (value > 0) && (i < maxsize); i++) {
+		t = value % base;
+		(t <= 9) 
+			? tempbuf[i]='0' + t 
+			: tempbuf[i]='a' + t - 10;
 
-
-	for (i=0; (value>0) && (i<maxsize); i++)
-	{
-		t=value % base;
-    if (t<=9)
-      tempbuf[i]='0'+t;
-    else
-      tempbuf[i]='a'+t-10;
-
-	  value=value / base;
+		value = value / base;
 	}
-
 
   /* we now have the string in reverse order, so put it in output reverse... */
-  t=i-1;
-  for (j=0;t>=0;t--,j++)
-    output[j]=tempbuf[t];
-
-  if (i<maxsize)
-		output[i]=0;
-	else
-    output[maxsize-1]=0;
+  t = i - 1;
+  for (j = 0; t >= 0; t--, j++) {
+	  output[j] = tempbuf[t];
+  }
+  (i < maxsize) 
+	  ? output[i] = 0
+	  : output[maxsize - 1] = 0;
 
 	return i; //return how many bytes are used
 }
 
-void sendchar(char c)
-{
-	char x;
-
+void sendchar(char c) {
 #if (!defined SERIALPORT) || (SERIALPORT == 0)
 	return;
 #endif
 
-  if (c=='\r')
-    return;
-
-  if (nosendchar[getAPICID()])
-    return;
-
-  x=inportb(SERIALPORT+5);
- //while ((x & 0x20) != 0x20)
-  while ((x & 0x40) != 0x40)
-	  x=inportb(SERIALPORT+5);
-
-	outportb(SERIALPORT,c);
-
-	if (c=='\n')
-	{
-	  x=inportb(SERIALPORT+5);
-	  while ((x & 0x20) != 0x20)
-	    x=inportb(SERIALPORT+5);
-
-	  outportb(SERIALPORT,'\r');
+	if ((c == '\r') || (nosendchar[getAPICID()])) {
+		return;
 	}
 
+	char x = inportb(SERIALPORT+5);
+	while ((x & 0x40) != 0x40) {
+		x = inportb(SERIALPORT + 5);
+	}
+	outportb(SERIALPORT,c);
 
+	if (c == '\n') {
+		x = inportb(SERIALPORT+5);
+		while ((x & 0x20) != 0x20) {
+			x = inportb(SERIALPORT + 5);
+		}
+
+		outportb(SERIALPORT,'\r');
+	}
 }
 
-void waitforkeypress(void)
-{
+// TODO: leaving off here...
+void waitforkeypress(void) {
   char x=inportb(0x60);
 
   while (x==inportb(0x60)) ;
