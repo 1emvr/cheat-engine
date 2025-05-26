@@ -23,171 +23,160 @@
 //#pragma GCC optimize ("O0")
 
 void psod(void) {
-  {
-    //remapping pagetable entry 0 to 0x00400000 so it's writabe (was marked unwritable after entry)
-    PPDPTE_PAE pml4entry = {};
-    PPDPTE_PAE pagedirpointerentry = {};
-    PPDE_PAE pagedirentry = {};
-    PPTE_PAE pagetableentry = {};
+	{
+		//remapping pagetable entry 0 to 0x00400000 so it's writabe (was marked unwritable after entry)
+		PPDPTE_PAE pml4entry;
+		PPDPTE_PAE pagedirpointerentry;
+		PPDE_PAE pagedirentry;
+		PPTE_PAE pagetableentry;
 
-    VirtualAddressToPageEntries(0, &pml4entry, &pagedirpointerentry, &pagedirentry, &pagetableentry);
-    pagedirentry[0].RW = 1;
-    pagedirentry[1].RW = 1;
-    asm volatile ("": : :"memory");
-  }
+		VirtualAddressToPageEntries(0, &pml4entry, &pagedirpointerentry, &pagedirentry, &pagetableentry);
+		pagedirentry[0].RW = 1;
+		pagedirentry[1].RW = 1;
+		asm volatile ("": : :"memory");
+	}
 
-  int x = call32bit((DWORD)(QWORD)PSOD32BitHandler);
+	int x = call32bit((DWORD)(QWORD)PSOD32BitHandler);
 
-  //tell other cpu's to stop
+	//tell other cpu's to stop
 
-  sendstringf("INF: call32bit((DWORD)PSOD32BitHandler) returned with %d\n", x);
+	sendstringf("INF: call32bit((DWORD)PSOD32BitHandler) returned with %d\n", x);
 
-  //disable PIC interrupts
+	//disable PIC interrupts
+	// jtagbp();
 
- // jtagbp();
+	//VBE enables interrupts..
+	BYTE old21 = inportb(0x21);
+	BYTE olda1 = inportb(0xa1);
+	QWORD oldcr8 = getCR8();
 
+	outportb(0x21,0xff);
+	outportb(0xa1,0xff);
+	setCR8(0xf);
 
-  //VBE enables interrupts..
-  BYTE old21 = inportb(0x21);
-  BYTE olda1 = inportb(0xa1);
-  QWORD oldcr8 = getCR8();
+	if (initializeVBE3()) {
+		WORD *vm;
+		VBE_ControllerInfo ci;
 
-  outportb(0x21,0xff);
-  outportb(0xa1,0xff);
-  setCR8(0xf);
+		zeromemory(&ci, sizeof(ci));
+		ci.VbeSignature=0x32454256;
 
-  if (initializeVBE3()) {
-    WORD *vm;
-    VBE_ControllerInfo ci;
+		if (VBE_GetControllerInfo(&ci)) {
+			sendstringf("INF: VBE_GetControllerInfo returned success\n");
+			sendstringf("  ci.Capabilities=%8\n", ci.Capabilities);
 
-    zeromemory(&ci, sizeof(ci));
-    ci.VbeSignature=0x32454256;
+			unsigned char *s = VBEPtrToAddress(ci.OemStringPtr);
+			if (s) {
+				sendstring("  ci.OemString=");
+				sendstring((char *)s);
+				sendstring("\n");
+			}
 
-    if (VBE_GetControllerInfo(&ci)) {
-      sendstringf("INF: VBE_GetControllerInfo returned success\n");
-      sendstringf("  ci.Capabilities = %8\n", ci.Capabilities);
+			sendstringf("  VideoModePointer at %6\n", VBEPtrToAddress(ci.VideoModePtr));
+			vm = VBEPtrToAddress(ci.VideoModePtr);
 
-      unsigned char *s = VBEPtrToAddress(ci.OemStringPtr);
-      if (s) {
-        sendstring("  ci.OemString=");
-        sendstring((char *)s);
-        sendstring("\n");
-      }
+			int bestmode = 0;
+			//find a mode I like
+			for (int i = 0; vm[i] != 0xffff; i++) {
+				VBE_ModeInfo mi;
+				sendstringf("    %x : \n", vm[i]);
 
-      sendstringf("  VideoModePointer at %6\n", VBEPtrToAddress(ci.VideoModePtr));
-      vm=VBEPtrToAddress(ci.VideoModePtr);
+				if (VBE_GetModeInfo(vm[i], &mi)) {
+					sendstringf("      %d x %d x %d (mode = %x PA = %8)\n", mi.XResolution, mi.YResolution, mi.BitsPerPixel, mi.ModeAttributes, mi.PhysBasePtr);
 
-      int bestmode=0;
-      //find a mode I like
-	  for (int i = 0; vm[i] != 0xffff; i++) {
-		  VBE_ModeInfo mi;
-		  sendstringf("    %x : \n", vm[i]);
+					if ((mi.XResolution > 600) && (mi.XResolution < 800) && (mi.YResolution > 400) && (mi.YResolution < 600) ) {
+						if (bestmode) {
+							VBE_ModeInfo other;
+							VBE_GetModeInfo(bestmode, &other);
 
-		  if (VBE_GetModeInfo(vm[i], &mi)) {
-			  sendstringf("      %d x %d x %d (mode = %x PA = %8)\n", mi.XResolution, mi.YResolution, mi.BitsPerPixel, mi.ModeAttributes, mi.PhysBasePtr);
+							if (mi.BitsPerPixel > other.BitsPerPixel) { //better color
+								bestmode = vm[i];
+							}
+						} else {
+							bestmode = vm[i];
+						}
+					}
+				} else {
+					sendstringf("      No mode info\n");
+				}
+			}
 
-			  if ((mi.XResolution > 600) && (mi.XResolution < 800) && (mi.YResolution > 400) && (mi.YResolution < 600) ) {
-				  if (bestmode) {
-					  VBE_ModeInfo other;
-					  VBE_GetModeInfo(bestmode, &other);
+			VBE_CRTCInfo crti;
+			zeromemory(&crti, sizeof(crti));
 
-					  if (mi.BitsPerPixel > other.BitsPerPixel) { //better color
-						  bestmode = vm[i];
-					  }
-				  } else {
-					  bestmode = vm[i];
-				  }
-			  }
-		  } else {
-			  sendstringf("      No mode info\n");
-		  }
-	  }
-      VBE_CRTCInfo crti = { };
-      zeromemory(&crti, sizeof(crti));
+			int statesize = VBE_GetStateStoreSize(); //not working
+			void *state = 0;
 
-      int statesize = VBE_GetStateStoreSize(); //not working
-      void *state;
+			if (statesize) {
+				sendstringf("INF: statesize = %d bytes\n", statesize);
+				state = malloc(statesize);
 
-      if (statesize) {
-        sendstringf("INF: statesize = %d bytes\n", statesize);
-        state=malloc(statesize);
+				VBE_SaveState(state, statesize);
+			} else {
+				sendstringf("INF: No statesize\n");
+			}
 
-        VBE_SaveState(state, statesize);
-      } else {
-        sendstringf("INF: No statesize\n");
-	  }
+			sendstringf("INF: Picked mode %x\n", bestmode);
 
-      sendstringf("INF: Picked mode %x\n", bestmode);
+			if (VBE_SetMode(bestmode | (1 << 14), &crti)) {
+				VBE_ModeInfo mi;
+				VBE_GetModeInfo(bestmode, &mi);
 
-      if (VBE_SetMode(bestmode | (1 << 14), &crti)) {
-        VBE_ModeInfo mi;
-        VBE_GetModeInfo(bestmode, &mi);
+				//blank the other pages
+				for (int i = 1; i < mi.LinNumberOfImagePages; i++) {
+					VBE_SetDrawPage(i);
+					VBE_SetPenColor(0xffff00);
+					VBE_DrawBox(0, 0, mi.XResolution - 1, mi.YResolution - 1);
+				}
 
-        //blank the other pages
-        for (i = 1; i < mi.LinNumberOfImagePages; i++) {
-          VBE_SetDrawPage(i);
-          VBE_SetPenColor(0xffff00);
-          VBE_DrawBox(0,0,mi.XResolution-1, mi.YResolution-1);
-        }
+				VBE_SetDrawPage(0);
 
-        VBE_SetDrawPage(0);
+				VBE_SetPenColor(0x00ffff);
+				VBE_DrawBox(0, 0, mi.XResolution - 1, mi.YResolution - 1);
 
-        VBE_SetPenColor(0x00ffff);
-        VBE_DrawBox(0,0,mi.XResolution-1, mi.YResolution-1);
+				VBE_SetPenColor(0x0000ff);
+				VBE_DrawBox(20, 40, mi.XResolution - 1 - 20, mi.YResolution - 1 - 40);
 
-        VBE_SetPenColor(0x0000ff);
-        VBE_DrawBox(20,40,mi.XResolution-1-20, mi.YResolution-1-40);
+				VBE_ResetStart();
+				/*
+				   while (1)
+				   _pause();
+				   */
 
-        VBE_ResetStart();
+			}
 
+			if (statesize) {
+				VBE_RestoreState(state, statesize);
+				displayline("WARN: Does this still work?\n");
+			}
+		}
 
-        /*
-        while (1)
-          _pause();
-          */
+	}
 
-      }
-
-      if (statesize) {
-        VBE_RestoreState(state, statesize);
-        displayline("WARN: Does this still work?\n");
-      }
-    }
-
-  }
-
-  __asm("cli");
-  outportb(0x21,old21);
-  outportb(0xa1,olda1);
-  setCR8(oldcr8);
+	__asm("cli");
+	outportb(0x21,old21);
+	outportb(0xa1,olda1);
+	setCR8(oldcr8);
 }
 
 QWORD readMSRSafe(DWORD msr) {
-  QWORD r;
-  try
-  {
-    r=readMSR(msr);
-  }
-  except
-  {
-    r=0;
-  }
-  tryend
-
-  return r;
+	QWORD r = 0;
+	try {
+		r = readMSR(msr);
+	} except {
+		// r = 0;
+	}
+	tryend
+	return r;
 }
 
-void writeMSRSafe(DWORD msr, QWORD value)
-{
-  try
-  {
-    writeMSR(msr, value);
-  }
-  except
-  {
-
-  }
-  tryend
+void writeMSRSafe(DWORD msr, QWORD value) {
+	try {
+		writeMSR(msr, value);
+	} except {
+		//
+	}
+	tryend
 }
 
 //#pragma GCC pop_options
@@ -197,23 +186,23 @@ int raisePagefault(pcpuinfo currentcpuinfo, UINT64 address) {
 	/*this will raise a non-present pagefault to the guest for the specified address
 	 *and set the usermode bit accordingly (not sure if needed, but better do it)
 	 */
-	PFerrorcode errorcode = { };
+	PFerrorcode errorcode;
 	errorcode.errorcode = 0;
 
-	if (currentcpuinfo==NULL) {
+	if (currentcpuinfo == NULL) {
 		currentcpuinfo=getcpuinfo();
 	}
 
 	//get DPL of SS (or CS?), if 3, set US to 1, if anything else, 0
 	if (isAMD) {
 		if (((PSegment_Attribs) (&currentcpuinfo->vmcb->cs_attrib))->DPL == 3) {
-			errorcode.US=1;
+			errorcode.US = 1;
 		} else {
-			errorcode.US=0;
+			errorcode.US = 0;
 		}
 	} else {
 		Access_Rights ssaccessrights;
-		ssaccessrights.AccessRights=vmread(vm_guest_cs_access_rights);
+		ssaccessrights.AccessRights = vmread(vm_guest_cs_access_rights);
 
 		if (ssaccessrights.DPL == 3) {
 			errorcode.US = 1;
@@ -235,7 +224,6 @@ int raisePagefault(pcpuinfo currentcpuinfo, UINT64 address) {
 		currentcpuinfo->vmcb->VMCB_CLEAN_BITS &= ~(1 << 9); //cr2 got changed
 	} else {
 		VMEntry_interruption_information newintinfo = { };
-
 		sendstringf("INF: errorcode.errorcode = %d\n\r", errorcode.errorcode);
 
 		newintinfo.interruption_information = 0;
@@ -257,6 +245,7 @@ int raisePagefault(pcpuinfo currentcpuinfo, UINT64 address) {
 
 int raiseInvalidOpcodeException(pcpuinfo currentcpuinfo) {
 	sendstring("INF: Raising Invalid opcode exception\n\r");
+
 	if (isAMD) {
 		currentcpuinfo->vmcb->inject_Type = 3; //excption fault/trap
 		currentcpuinfo->vmcb->inject_Vector = 6; //#UD
@@ -283,7 +272,7 @@ int raisePrivilege(pcpuinfo currentcpuinfo) {
 	//Will change iopl to 0 and changes rpl and dlp of CS and SS to 0
 	//return 0 if success
 	//return 1 if interrupts are not disabled
-	Access_Rights accessright = { };
+	Access_Rights accessright;
 	UINT64 guestrflags = vmread(vm_guest_rflags);
 	PRFLAGS pguestrflags = (PRFLAGS)&guestrflags;
 
@@ -1943,24 +1932,25 @@ int _handleVMCallInstruction(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, 
       PVMCALL_ADD_MEMORY_PARAM p = (PVMCALL_ADD_MEMORY_PARAM) vmcall_instruction;
       int pagecount = (p->vmcall.size - sizeof(VMCALL_ADD_MEMORY_PARAM)) / 8;
 
-      nosendchar[getAPICID()]=0;
-      sendstringf("VMCALL_ADD_MEMORY\n");
+      nosendchar[getAPICID()] = 0;
+      sendstringf("INF: VMCALL_ADD_MEMORY\n");
       mmAddPhysicalPageListToDBVM(p->PhysicalPages, pagecount,0);
       vmregisters->rax = pagecount; //0;
+									//
       break;
     }
 
     case VMCALL_SETTSCADJUST:
     {
-      PVMCALL_SETTSCADJUST_PARAM p=(PVMCALL_SETTSCADJUST_PARAM)vmcall_instruction;
-      adjustTimestampCounterTimeout=p->timeout;
-      adjustTimestampCounters=p->enabled;
+      PVMCALL_SETTSCADJUST_PARAM p = (PVMCALL_SETTSCADJUST_PARAM) vmcall_instruction;
+      adjustTimestampCounterTimeout = p->timeout;
+      adjustTimestampCounters = p->enabled;
       break;
     }
 
     case VMCALL_SETSPEEDHACK:
     {
-      PVMCALL_SETSPEEDHACK_PARAM p=(PVMCALL_SETSPEEDHACK_PARAM)vmcall_instruction;
+      PVMCALL_SETSPEEDHACK_PARAM p = (PVMCALL_SETSPEEDHACK_PARAM)vmcall_instruction;
       speedhack_setspeed(p->speedhackspeed);
       break;
     }
@@ -2015,27 +2005,21 @@ int _handleVMCallInstruction(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, 
     case VMCALL_GET_STATISTICS:
     {
     	int globaleventcounter[56];
-    	QWORD totalevents=0;
-    	pcpuinfo c=firstcpuinfo;
-    	PVMCALL_GET_STATISTICS_PARAM p=(PVMCALL_GET_STATISTICS_PARAM)vmcall_instruction;
-    	copymem(&p->eventcounter[0],&currentcpuinfo->eventcounter[0],sizeof(int)*56);
+    	QWORD totalevents = 0;
+    	pcpuinfo c = firstcpuinfo;
+    	PVMCALL_GET_STATISTICS_PARAM p = (PVMCALL_GET_STATISTICS_PARAM) vmcall_instruction;
+    	copymem(&p->eventcounter[0], &currentcpuinfo->eventcounter[0], sizeof(int) * 56);
 
-    	zeromemory(&globaleventcounter[0],sizeof(int)*56);
-    	while (c)
-    	{
-    		int i;
-    		for (i=0;i<56;i++)
-    		{
+    	zeromemory(&globaleventcounter[0], sizeof(int) * 56);
+    	while (c) {
+    		for (int i = 0; i < 56; i++) {
     			globaleventcounter[i]+=c->eventcounter[i];
     			totalevents+=c->eventcounter[i];
     		}
-
-    		c=c->next;
+    		c = c->next;
     	}
 
     	copymem(&p->globaleventcounter[0],&globaleventcounter[0],sizeof(int)*56);
-
-
     	vmregisters->rax=totalevents;
     	break;
     }
@@ -2043,34 +2027,31 @@ int _handleVMCallInstruction(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, 
 
     case VMCALL_WATCH_GETSTATUS:
     {
-      typedef struct
-      {
+      typedef struct {
         VMCALL_BASIC vmcall;
         EPTWatchLogData last;
         EPTWatchLogData best;
       } __attribute__((__packed__)) *PVMCALL_WATCH_GETSTATUS_PARAM;
 
 
-      PVMCALL_WATCH_GETSTATUS_PARAM p=(PVMCALL_WATCH_GETSTATUS_PARAM)vmcall_instruction;
+      PVMCALL_WATCH_GETSTATUS_PARAM p = (PVMCALL_WATCH_GETSTATUS_PARAM) vmcall_instruction;
 
-
-      p->last=lastSeenEPTWatch;
-      p->best=lastSeenEPTWatchVerySure;
+      p->last = lastSeenEPTWatch;
+      p->best = lastSeenEPTWatchVerySure;
       vmregisters->rax = 0;
       break;
     }
 
     case VMCALL_GETBROKENTHREADLISTSIZE:
     {
-      vmregisters->rax=ept_getBrokenThreadListCount();
+      vmregisters->rax = ept_getBrokenThreadListCount();
       break;
 
     }
 
     case VMCALL_GETBROKENTHREADENTRYSHORT:
     {
-      typedef struct
-      {
+      typedef struct {
         VMCALL_BASIC vmcall;
         int id;
         int Watchid;
@@ -2084,64 +2065,64 @@ int _handleVMCallInstruction(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, 
         QWORD Heartbeat;
 
       }  __attribute__((__packed__)) *PGETBROKENTHREADENTRYSHORT_PARAM;
-      PGETBROKENTHREADENTRYSHORT_PARAM p=(PGETBROKENTHREADENTRYSHORT_PARAM)vmcall_instruction;
 
-      vmregisters->rax=ept_getBrokenThreadEntryShort(p->id, &p->Watchid, &p->Status, &p->CR3, &p->FSBASE, &p->GSBASE, &p->GSBASE_KERNEL, &p->CS, &p->RIP, &p->Heartbeat);
+      PGETBROKENTHREADENTRYSHORT_PARAM p = (PGETBROKENTHREADENTRYSHORT_PARAM) vmcall_instruction;
+
+      vmregisters->rax = ept_getBrokenThreadEntryShort(p->id, &p->Watchid, &p->Status, &p->CR3, &p->FSBASE, &p->GSBASE, &p->GSBASE_KERNEL, &p->CS, &p->RIP, &p->Heartbeat);
       break;
     }
 
     case VMCALL_GETBROKENTHREADENTRYFULL:
     {
-      typedef struct
-      {
+      typedef struct {
         VMCALL_BASIC vmcall;
         int id;
         int watchid;
         int status;
         PageEventExtended entry;
       }  __attribute__((__packed__)) *PGETBROKENTHREADENTRYFULL_PARAM;
-      PGETBROKENTHREADENTRYFULL_PARAM p=(PGETBROKENTHREADENTRYFULL_PARAM)vmcall_instruction;
 
-      vmregisters->rax=ept_getBrokenThreadEntryFull(p->id, &p->watchid,  &p->status, &p->entry);
+      PGETBROKENTHREADENTRYFULL_PARAM p = (PGETBROKENTHREADENTRYFULL_PARAM) vmcall_instruction;
+
+      vmregisters->rax = ept_getBrokenThreadEntryFull(p->id, &p->watchid,  &p->status, &p->entry);
       break;
     }
 
     case VMCALL_SETBROKENTHREADENTRYFULL:
     {
-      typedef struct
-      {
+      typedef struct {
         VMCALL_BASIC vmcall;
         int id;
         PageEventExtended entry;
       }  __attribute__((__packed__)) *PGETBROKENTHREADENTRYFULL_PARAM;
-      PGETBROKENTHREADENTRYFULL_PARAM p=(PGETBROKENTHREADENTRYFULL_PARAM)vmcall_instruction;
 
-      vmregisters->rax=ept_setBrokenThreadEntryFull(p->id, &p->entry);
+      PGETBROKENTHREADENTRYFULL_PARAM p = (PGETBROKENTHREADENTRYFULL_PARAM) vmcall_instruction;
+
+      vmregisters->rax = ept_setBrokenThreadEntryFull(p->id, &p->entry);
       break;
     }
 
     case VMCALL_RESUMEBROKENTHREAD:
     {
-      typedef struct
-      {
+      typedef struct {
         VMCALL_BASIC vmcall;
         DWORD id;
         DWORD continueMethod;
       }  __attribute__((__packed__)) *PVMCALL_RESUMEBROKENTHREAD_PARAM;
-      PVMCALL_RESUMEBROKENTHREAD_PARAM p=(PVMCALL_RESUMEBROKENTHREAD_PARAM)vmcall_instruction;
 
-      nosendchar[getAPICID()]=0;
-      sendstringf("VMCALL_RESUMEBROKENTHREAD %d\n", p->id);
-      vmregisters->rax=ept_resumeBrokenThread(p->id, p->continueMethod);
+      PVMCALL_RESUMEBROKENTHREAD_PARAM p = (PVMCALL_RESUMEBROKENTHREAD_PARAM) vmcall_instruction;
+
+      nosendchar[getAPICID()] = 0;
+      sendstringf("INF: VMCALL_RESUMEBROKENTHREAD %d\n", p->id);
+      vmregisters->rax = ept_resumeBrokenThread(p->id, p->continueMethod);
       break;
     }
 
     case VMCALL_CAUSEDDEBUGBREAK:
     {
-
       //When DBVM causes an int1 BP this says so (on the cpu that cause it, once)
-      vmregisters->rax=currentcpuinfo->BPCausedByDBVM;
-      currentcpuinfo->BPCausedByDBVM=0;
+      vmregisters->rax = currentcpuinfo->BPCausedByDBVM;
+      currentcpuinfo->BPCausedByDBVM = 0;
       break;
     }
 
@@ -2153,23 +2134,19 @@ int _handleVMCallInstruction(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, 
 
     case VMCALL_DISABLETSCHOOK:
     {
-      if (useSpeedhack==FALSE)
-      {
+      if (useSpeedhack == FALSE) {
         vmx_disableTSCHook(currentcpuinfo);
-        vmregisters->rax=1;
-      }
-      else
+        vmregisters->rax = 1;
+      } else {
         vmregisters->rax=0;
+	  }
       break;
     }
-
-
-
 
     case VMCALL_KERNELMODE:
     {
 
-      WORD newCS = *(WORD*)&vmcall_instruction[3];
+      WORD newCS = *(WORD*) &vmcall_instruction[3];
       vmregisters->rax = VMCALL_SwitchToKernelMode(currentcpuinfo, newCS);
       break;
     }
@@ -2183,49 +2160,45 @@ int _handleVMCallInstruction(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, 
     case VMCALL_DEBUG_SETSPINLOCKTIMEOUT:
     {
 #ifdef DEBUG
-      typedef struct
-      {
+      typedef struct {
         VMCALL_BASIC vmcall;
         QWORD timeout;
       }  __attribute__((__packed__)) *PVMCALL_DEBUG_SETSPINLOCKTIMEOUT;
-      PVMCALL_DEBUG_SETSPINLOCKTIMEOUT p=(PVMCALL_DEBUG_SETSPINLOCKTIMEOUT)vmcall_instruction;
 
-      nosendchar[getAPICID()]=0;
-      sendstringf("Setting spinlocktimeout to %6", p->timeout);
-      spinlocktimeout=p->timeout;
-      vmregisters->rax=0;
+      PVMCALL_DEBUG_SETSPINLOCKTIMEOUT p = (PVMCALL_DEBUG_SETSPINLOCKTIMEOUT) vmcall_instruction;
+
+      nosendchar[getAPICID()] = 0;
+      sendstringf("INF: Setting spinlocktimeout to %6", p->timeout);
+      spinlocktimeout = p->timeout;
+      vmregisters->rax = 0;
 #else
-      vmregisters->rax=0xCEDEAD;
+      vmregisters->rax = 0xCEDEAD;
 #endif
       break;
     }
-
-
 
     default:
       vmregisters->rax = 0xcedead;
       break;
   }
 
-  if (isAMD)
-  {
-    currentcpuinfo->vmcb->RAX=vmregisters->rax;
-    if (AMD_hasNRIPS)
+  if (isAMD) {
+    currentcpuinfo->vmcb->RAX = vmregisters->rax;
+    if (AMD_hasNRIPS) {
       getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-    else
-      getcpuinfo()->vmcb->RIP+=3;
+	} else {
+      getcpuinfo()->vmcb->RIP += 3;
+	}
 
-  }
-  else
-  {
+  } else {
     //handled, so increase eip to the next instruction and continue
-    vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
+    vmwrite(vm_guest_rip, vmread(vm_guest_rip) + vmread(vm_exit_instructionlength));
   }
 
   return 0;
 }
 
-int _handleVMCall(pcpuinfo currentcpuinfo, VMRegisters *vmregisters)
+int _handleVMCall(pcpuinfo currentcpuinfo, VMRegisters *vmregisters) {
 /*
  * vmcall:
  * eax=pointer to information structure
@@ -2238,197 +2211,176 @@ int _handleVMCall(pcpuinfo currentcpuinfo, VMRegisters *vmregisters)
  * ... Extra data depending on command, see doc, "vmcall commands"
  *
  */
-{
 
-  int error;
-  UINT64 pagefaultaddress;
-  ULONG *vmcall_instruction;
+
+	int error;
+	UINT64 pagefaultaddress;
+	ULONG *vmcall_instruction;
 
 #ifdef DEBUG
-  //enableserial();
+	//enableserial();
+#endif
+
+	currentcpuinfo->LastVMCall =- 1;
+
+	if (realmode_inthook_calladdressPA) { //realmode hook present
+		//get the physical address of RIP
+		sendstring("INF: Realmode hook VMCALL present. Checking of RIP physical matches\n");
+		int notpaged = 0;
+		QWORD RIP_PA = getPhysicalAddressVM(currentcpuinfo, vmread(vm_guest_cs_base) + vmread(vm_guest_rip), &notpaged);
+
+		if (RIP_PA == realmode_inthook_calladdressPA) {
+			sendstringf("INF: Match confirmed\n");
+			int r = handleRealModeInt0x15(currentcpuinfo, vmregisters, vmread(vm_exit_instructionlength));
+
+			sendstringf("INF: handleRealModeInt0x15 returned %d (should be 0)\n",r);
+			ddDrawRectangle(0, DDVerticalResolution - 100, 100, 100, 0xff0000);
+
+			if (r) {
+				nosendchar[getAPICID()] = 0;
+				sendstringf("INF: handleRealModeInt0x15 returned %d (should be 0)\n",r);
+
+				while (1) {
+					outportb(0x80,0xd2);
+				}
+			}
+			return 0;
+		}
+	}
+
+	// sendstringf("Handling vm(m)call on cpunr:%d \n\r", currentcpuinfo->cpunr);
+	if (isAMD) {
+		vmregisters->rax = currentcpuinfo->vmcb->RAX; //fill it in, it may get used here
+	}
+
+	//check password, if false, raise unknown opcode exception
+	if ((vmregisters->rdx != Password1) || (vmregisters->rcx != Password3)) {
+		int x = 0;
+		sendstringf("ERR: Invalid register password Given=%6 %6 should be %6 %6\n\r", vmregisters->rdx, vmregisters->rcx, Password1, Password3);
+		x = raiseInvalidOpcodeException(currentcpuinfo);
+		sendstringf("return = %d\n\r",x);
+		return x;
+	}
+
+	//sendstringf("Password1 is valid\n\r");
+	// sendstringf("vmregisters->rax=%6\n\r", vmregisters->rax);
+
+	//still here, so password1 is valid
+	//map the memory of the information structure
+
+	vmcall_instruction = (ULONG*) mapVMmemory(currentcpuinfo, vmregisters->rax, 12, &error, &pagefaultaddress);
+	if (error) {
+		sendstringf("1: Error. error=%d pagefaultaddress=%6\n\r",error,pagefaultaddress);
+
+		if (error==2) {//caused by pagefault, raise pagefault
+			return raisePagefault(currentcpuinfo, pagefaultaddress);
+		}
+
+		return raiseInvalidOpcodeException(currentcpuinfo);
+	}
+
+	//sendstringf("Mapped vmcall instruction structure (vmcall_instruction=%6)\n\r",(UINT64)vmcall_instruction);
+	//sendstringf("vmcall_instruction[0]=%8\n\r",vmcall_instruction[0]);
+	//sendstringf("vmcall_instruction[1]=%8\n\r",vmcall_instruction[1]);
+	//sendstringf("vmcall_instruction[2]=%8\n\r",vmcall_instruction[2]);
+
+	if ((vmcall_instruction[0] < 12) || (vmcall_instruction[1] != Password2)) {
+		int maxnr = 0;
+
+		sendstringf("Invalid password2 or structuresize. Given=%8 should be %8\n\r",vmcall_instruction[1], Password2);
+		sendstringf("0: %8", vmcall_instruction[0]);
+
+		maxnr = vmcall_instruction[i] / 4;
+		if (maxnr>3) {
+			maxnr = 3;
+		}
+
+		for (int i = 0; i < maxnr; i++) {
+			sendstringf("%d: %8\n", i, vmcall_instruction[i]);
+		}
+
+		unmapVMmemory(vmcall_instruction,12);
+		return raiseInvalidOpcodeException(currentcpuinfo);
+	}
+
+	int vmcall_instruction_size = vmcall_instruction[0];
+
+	if (vmcall_instruction_size > 16 * 1024) {
+		sendstringf("ERR: Invalid vmcall_instruction_size:%d : Exceeds the 16KB max size for vmcall data structures\n");
+		unmapVMmemory(vmcall_instruction, 12);
+		return raiseInvalidOpcodeException(currentcpuinfo);
+	}
+
+	//still here, so password valid and data structure paged in memory
+	if (vmcall_instruction_size > 12) {//remap to take the extra parameters into account
+		//    sendstringf("Remapping to support size: %8\n\r",vmcall_instruction[0]);
+		int neededsize = vmcall_instruction_size;
+		unmapVMmemory(vmcall_instruction, vmcall_instruction_size);
+		vmcall_instruction = (ULONG*) mapVMmemory(currentcpuinfo, vmregisters->rax, neededsize, &error, &pagefaultaddress);
+	}
+
+#ifdef DEBUG
+	//int totaldwords = vmcall_instruction[0] / 4;
+	//int i;
+	//for (i=3; i<totaldwords; i++)
+	//{
+	//  sendstringf("vmcall_instruction[%d]=%x\n\r",i, vmcall_instruction[i]);
+	//}
 #endif
 
 
-  currentcpuinfo->LastVMCall=-1;
+	if (error) {
+		sendstringf("2: Error. error=%d pagefaultaddress=%8\n\r",error,pagefaultaddress);
+		unmapVMmemory(vmcall_instruction, vmcall_instruction_size);
 
-  if (realmode_inthook_calladdressPA) //realmode hook present
-  {
-    //get the physical address of RIP
-    sendstring("Realmode hook VMCALL present. Checking of RIP physical matches\n");
-    int notpaged;
-    QWORD RIP_PA=getPhysicalAddressVM(currentcpuinfo, vmread(vm_guest_cs_base)+vmread(vm_guest_rip), &notpaged);
-    if (RIP_PA==realmode_inthook_calladdressPA)
-    {
-      sendstringf("Match confirmed\n");
-      int r=handleRealModeInt0x15(currentcpuinfo, vmregisters, vmread(vm_exit_instructionlength));
+		if (error==2) {//caused by pagefault, raise pagefault
+			return raisePagefault(currentcpuinfo, pagefaultaddress);
+		}
 
-      sendstringf("handleRealModeInt0x15 returned %d (should be 0)\n",r);
-      ddDrawRectangle(0,DDVerticalResolution-100,100,100,0xff0000);
-      if (r)
-      {
-        nosendchar[getAPICID()]=0;
-        sendstringf("handleRealModeInt0x15 returned %d (should be 0)\n",r);
-
-        while (1) outportb(0x80,0xd2);
-      }
-      return 0;
-    }
-  }
+		return raiseInvalidOpcodeException(currentcpuinfo);
+	}
 
 
- // sendstringf("Handling vm(m)call on cpunr:%d \n\r", currentcpuinfo->cpunr);
+	//sendstringf("Handling vmcall command %d\n\r",vmcall_instruction[2]);
 
-  if (isAMD)
-    vmregisters->rax=currentcpuinfo->vmcb->RAX; //fill it in, it may get used here
-
-
-  //check password, if false, raise unknown opcode exception
-  if ((vmregisters->rdx != Password1) || (vmregisters->rcx != Password3))
-  {
-    int x;
-    sendstringf("Invalid register password Given=%6 %6 should be %6 %6\n\r",vmregisters->rdx, vmregisters->rcx, Password1, Password3);
-    x = raiseInvalidOpcodeException(currentcpuinfo);
-    sendstringf("return = %d\n\r",x);
-    return x;
-  }
-
-
-
-  //sendstringf("Password1 is valid\n\r");
-
-
- // sendstringf("vmregisters->rax=%6\n\r", vmregisters->rax);
-
-  //still here, so password1 is valid
-  //map the memory of the information structure
-
-
-  vmcall_instruction=(ULONG *)mapVMmemory(currentcpuinfo, vmregisters->rax, 12, &error, &pagefaultaddress);
-
-  if (error)
-  {
-    sendstringf("1: Error. error=%d pagefaultaddress=%6\n\r",error,pagefaultaddress);
-
-    if (error==2) //caused by pagefault, raise pagefault
-      return raisePagefault(currentcpuinfo, pagefaultaddress);
-
-    return raiseInvalidOpcodeException(currentcpuinfo);
-  }
-
-  //sendstringf("Mapped vmcall instruction structure (vmcall_instruction=%6)\n\r",(UINT64)vmcall_instruction);
- //sendstringf("vmcall_instruction[0]=%8\n\r",vmcall_instruction[0]);
-  //sendstringf("vmcall_instruction[1]=%8\n\r",vmcall_instruction[1]);
-  //sendstringf("vmcall_instruction[2]=%8\n\r",vmcall_instruction[2]);
-
-
-
-  if ((vmcall_instruction[0]<12) || (vmcall_instruction[1]!=Password2))
-  {
-    int i, maxnr;
-    sendstringf("Invalid password2 or structuresize. Given=%8 should be %8\n\r",vmcall_instruction[1], Password2);
-
-    sendstringf("0: %8", vmcall_instruction[0]);
-
-    maxnr=vmcall_instruction[i] / 4;
-    if (maxnr>3)
-      maxnr=3;
-
-    for (i=0; i<maxnr; i++)
-      sendstringf("%d: %8\n", i, vmcall_instruction[i]);
-
-
-    unmapVMmemory(vmcall_instruction,12);
-    return raiseInvalidOpcodeException(currentcpuinfo);
-  }
-
-
-  int vmcall_instruction_size=vmcall_instruction[0];
-
-  if (vmcall_instruction_size>16*1024)
-  {
-    sendstringf("Invalid vmcall_instruction_size:%d : Exceeds the 16KB max size for vmcall data structures\n");
-    unmapVMmemory(vmcall_instruction,12);
-    return raiseInvalidOpcodeException(currentcpuinfo);
-  }
-
-  //still here, so password valid and data structure paged in memory
-  if (vmcall_instruction_size>12) //remap to take the extra parameters into account
-  {
-//    sendstringf("Remapping to support size: %8\n\r",vmcall_instruction[0]);
-    int neededsize=vmcall_instruction_size;
-    unmapVMmemory(vmcall_instruction, vmcall_instruction_size);
-    vmcall_instruction=(ULONG *)mapVMmemory(currentcpuinfo, vmregisters->rax, neededsize, &error, &pagefaultaddress);
-  }
-
-#ifdef DEBUG
-  //int totaldwords = vmcall_instruction[0] / 4;
-  //int i;
-  //for (i=3; i<totaldwords; i++)
-  //{
-  //  sendstringf("vmcall_instruction[%d]=%x\n\r",i, vmcall_instruction[i]);
-  //}
-#endif
-
-
-  if (error)
-  {
-    sendstringf("2: Error. error=%d pagefaultaddress=%8\n\r",error,pagefaultaddress);
-
-    unmapVMmemory(vmcall_instruction, vmcall_instruction_size);
-
-    if (error==2) //caused by pagefault, raise pagefault
-      return raisePagefault(currentcpuinfo, pagefaultaddress);
-
-    return raiseInvalidOpcodeException(currentcpuinfo);
-  }
-
-
-  //sendstringf("Handling vmcall command %d\n\r",vmcall_instruction[2]);
-
-  int r=_handleVMCallInstruction(currentcpuinfo, vmregisters, vmcall_instruction);
-  unmapVMmemory(vmcall_instruction, vmcall_instruction_size);
-  return r;
+	int r = _handleVMCallInstruction(currentcpuinfo, vmregisters, vmcall_instruction);
+	unmapVMmemory(vmcall_instruction, vmcall_instruction_size);
+	return r;
 }
 
 //serialize these calls in case one makes an internal change that affects global (e.g alloc)
-criticalSection vmcallCS={.name="vmcallCS", .debuglevel=2};
-int handleVMCall(pcpuinfo currentcpuinfo, VMRegisters *vmregisters)
-{
-  int result;
-  csEnter(&vmcallCS);
+criticalSection vmcallCS = { .name="vmcallCS", .debuglevel = 2 };
 
-  try
-  {
-    result=_handleVMCall(currentcpuinfo, vmregisters);
-  }
-  except
-  {
-    int err=lastexception;
+int handleVMCall(pcpuinfo currentcpuinfo, VMRegisters *vmregisters) {
+	int result = 0;
+	csEnter(&vmcallCS);
 
-    nosendchar[getAPICID()]=0;
-    sendstringf("Exception %x happened during handling of VMCALL\n", err);
+	try {
+		result=_handleVMCall(currentcpuinfo, vmregisters);
+	} except {
+		int err = lastexception;
 
-    try
-    {
-      jtagbp();
-    }
-    except
-    {
-      sendstringf("no jtag available\n");
-      ddDrawRectangle(0,DDVerticalResolution-100,100,100,0xff0000);
-      while (1) outportb(0x80,0xd3);
-    }
-    tryend
+		nosendchar[getAPICID()] = 0;
+		sendstringf("ERR: Exception %x happened during handling of VMCALL\n", err);
 
+		try {
+			jtagbp();
+		} except {
+			sendstringf("no jtag available\n");
+			ddDrawRectangle(0, DDVerticalResolution - 100, 100, 100, 0xff0000);
 
-    raiseInvalidOpcodeException(currentcpuinfo);
-    result=0;
-  }
-  tryend
+			while (1) {
+				outportb(0x80,0xd3);
+			}
+		}
+		tryend
 
+			raiseInvalidOpcodeException(currentcpuinfo);
+		result = 0;
+	}
+	tryend
 
-  csLeave(&vmcallCS);
-
-  return result;
+		csLeave(&vmcallCS);
+	return result;
 }
 
