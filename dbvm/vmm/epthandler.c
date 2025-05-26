@@ -912,436 +912,375 @@ int ept_cloak_traceonbp(QWORD physicalAddress, DWORD flags, DWORD tracecount) {
 }
 
 int ept_cloak_changeregonbp(QWORD physicalAddress, PCHANGEREGONBPINFO changereginfo) {
-  int result = 1;
+	int result = 1;
 
-  nosendchar[getAPICID()]=0;
-  sendstringf("ept_cloak_changeregonbp(%6,%6)\n", physicalAddress, changereginfo);
+	nosendchar[getAPICID()] = 0;
 
-  sendstringf("Removing old changeregonbp\n");
-  ept_cloak_removechangeregonbp(physicalAddress);
+	sendstringf("INF: ept_cloak_changeregonbp(%6,%6)\n", physicalAddress, changereginfo);
+	sendstringf("INF: Removing old changeregonbp\n");
 
-  QWORD physicalBase=physicalAddress & MAXPHYADDRMASKPB;
+	ept_cloak_removechangeregonbp(physicalAddress);
+	QWORD physicalBase = physicalAddress & MAXPHYADDRMASKPB;
 
-  sendstringf("Activating cloak at base %6 (if not yet active)\n", physicalBase);
-  ept_cloak_activate(physicalBase,0); //just making sure
+	sendstringf("INF: Activating cloak at base %6 (if not yet active)\n", physicalBase);
+	ept_cloak_activate(physicalBase, 0); //just making sure
 
-  sendstringf("ept_cloak_changeregonbp:\n");
-  sendstringf("  changeRAX:%d\n", changereginfo->Flags.changeRAX);
-  sendstringf("  changeRBX:%d\n", changereginfo->Flags.changeRBX);
-  sendstringf("  changeRCX:%d\n", changereginfo->Flags.changeRCX);
-  sendstringf("  changeRDX:%d\n", changereginfo->Flags.changeRDX);
-  sendstringf("  changeRSI:%d\n", changereginfo->Flags.changeRSI);
-  sendstringf("  changeRDI:%d\n", changereginfo->Flags.changeRDI);
-  sendstringf("  changeRBP:%d\n", changereginfo->Flags.changeRBP);
-  sendstringf("  changeRSP:%d\n", changereginfo->Flags.changeRSP);
-  sendstringf("  changeRIP:%d\n", changereginfo->Flags.changeRIP);
-  sendstringf("  changeR8:%d\n", changereginfo->Flags.changeR8);
-  sendstringf("  changeR9:%d\n", changereginfo->Flags.changeR9);
-  sendstringf("  changeR10:%d\n", changereginfo->Flags.changeR10);
-  sendstringf("  changeR11:%d\n", changereginfo->Flags.changeR11);
-  sendstringf("  changeR12:%d\n", changereginfo->Flags.changeR12);
-  sendstringf("  changeR13:%d\n", changereginfo->Flags.changeR13);
-  sendstringf("  changeR14:%d\n", changereginfo->Flags.changeR14);
-  sendstringf("  changeR15:%d\n", changereginfo->Flags.changeR15);
-  sendstringf("  changeCF:%d\n", changereginfo->Flags.changeCF);
-  sendstringf("  changePF:%d\n", changereginfo->Flags.changePF);
-  sendstringf("  changeAF:%d\n", changereginfo->Flags.changeAF);
-  sendstringf("  changeZF:%d\n", changereginfo->Flags.changeZF);
-  sendstringf("  changeSF:%d\n", changereginfo->Flags.changeSF);
-  sendstringf("  changeOF:%d\n", changereginfo->Flags.changeOF);
-  sendstringf("  newCF:%d\n", changereginfo->Flags.newCF);
-  sendstringf("  newPF:%d\n", changereginfo->Flags.newPF);
-  sendstringf("  newAF:%d\n", changereginfo->Flags.newAF);
-  sendstringf("  newZF:%d\n", changereginfo->Flags.newZF);
-  sendstringf("  newSF:%d\n", changereginfo->Flags.newSF);
-  sendstringf("  newOF:%d\n", changereginfo->Flags.newOF);
+	sendstringf("ept_cloak_changeregonbp:\n");
+	sendstringf("  changeRAX:%d\n", changereginfo->Flags.changeRAX);
+	sendstringf("  changeRBX:%d\n", changereginfo->Flags.changeRBX);
+	sendstringf("  changeRCX:%d\n", changereginfo->Flags.changeRCX);
+	sendstringf("  changeRDX:%d\n", changereginfo->Flags.changeRDX);
+	sendstringf("  changeRSI:%d\n", changereginfo->Flags.changeRSI);
+	sendstringf("  changeRDI:%d\n", changereginfo->Flags.changeRDI);
+	sendstringf("  changeRBP:%d\n", changereginfo->Flags.changeRBP);
+	sendstringf("  changeRSP:%d\n", changereginfo->Flags.changeRSP);
+	sendstringf("  changeRIP:%d\n", changereginfo->Flags.changeRIP);
+	sendstringf("  changeR8:%d\n", changereginfo->Flags.changeR8);
+	sendstringf("  changeR9:%d\n", changereginfo->Flags.changeR9);
+	sendstringf("  changeR10:%d\n", changereginfo->Flags.changeR10);
+	sendstringf("  changeR11:%d\n", changereginfo->Flags.changeR11);
+	sendstringf("  changeR12:%d\n", changereginfo->Flags.changeR12);
+	sendstringf("  changeR13:%d\n", changereginfo->Flags.changeR13);
+	sendstringf("  changeR14:%d\n", changereginfo->Flags.changeR14);
+	sendstringf("  changeR15:%d\n", changereginfo->Flags.changeR15);
+	sendstringf("  changeCF:%d\n", changereginfo->Flags.changeCF);
+	sendstringf("  changePF:%d\n", changereginfo->Flags.changePF);
+	sendstringf("  changeAF:%d\n", changereginfo->Flags.changeAF);
+	sendstringf("  changeZF:%d\n", changereginfo->Flags.changeZF);
+	sendstringf("  changeSF:%d\n", changereginfo->Flags.changeSF);
+	sendstringf("  changeOF:%d\n", changereginfo->Flags.changeOF);
+	sendstringf("  newCF:%d\n", changereginfo->Flags.newCF);
+	sendstringf("  newPF:%d\n", changereginfo->Flags.newPF);
+	sendstringf("  newAF:%d\n", changereginfo->Flags.newAF);
+	sendstringf("  newZF:%d\n", changereginfo->Flags.newZF);
+	sendstringf("  newSF:%d\n", changereginfo->Flags.newSF);
+	sendstringf("  newOF:%d\n", changereginfo->Flags.newOF);
 
-  sendstringf("  newRAX:%d\n", changereginfo->newRAX);
-  sendstringf("  newRBX:%d\n", changereginfo->newRBX);
-  sendstringf("  newRCX:%d\n", changereginfo->newRCX);
-  sendstringf("  newRDX:%d\n", changereginfo->newRDX);
-  sendstringf("  newRSI:%d\n", changereginfo->newRSI);
-  sendstringf("  newRDI:%d\n", changereginfo->newRDI);
-  sendstringf("  newRBP:%d\n", changereginfo->newRBP);
-  sendstringf("  newRSP:%d\n", changereginfo->newRSP);
-  sendstringf("  newRIP:%d\n", changereginfo->newRIP);
-  sendstringf("  newR8:%d\n", changereginfo->newR8);
-  sendstringf("  newR9:%d\n", changereginfo->newR9);
-  sendstringf("  newR10:%d\n", changereginfo->newR10);
-  sendstringf("  newR11:%d\n", changereginfo->newR11);
-  sendstringf("  newR12:%d\n", changereginfo->newR12);
-  sendstringf("  newR13:%d\n", changereginfo->newR13);
-  sendstringf("  newR14:%d\n", changereginfo->newR14);
-  sendstringf("  newR15:%d\n", changereginfo->newR15);
+	sendstringf("  newRAX:%d\n", changereginfo->newRAX);
+	sendstringf("  newRBX:%d\n", changereginfo->newRBX);
+	sendstringf("  newRCX:%d\n", changereginfo->newRCX);
+	sendstringf("  newRDX:%d\n", changereginfo->newRDX);
+	sendstringf("  newRSI:%d\n", changereginfo->newRSI);
+	sendstringf("  newRDI:%d\n", changereginfo->newRDI);
+	sendstringf("  newRBP:%d\n", changereginfo->newRBP);
+	sendstringf("  newRSP:%d\n", changereginfo->newRSP);
+	sendstringf("  newRIP:%d\n", changereginfo->newRIP);
+	sendstringf("  newR8:%d\n", changereginfo->newR8);
+	sendstringf("  newR9:%d\n", changereginfo->newR9);
+	sendstringf("  newR10:%d\n", changereginfo->newR10);
+	sendstringf("  newR11:%d\n", changereginfo->newR11);
+	sendstringf("  newR12:%d\n", changereginfo->newR12);
+	sendstringf("  newR13:%d\n", changereginfo->newR13);
+	sendstringf("  newR14:%d\n", changereginfo->newR14);
+	sendstringf("  newR15:%d\n", changereginfo->newR15);
 
+	csEnter(&CloakedPagesCS);
+	PCloakedPageData cloakdata;
 
-  csEnter(&CloakedPagesCS);
+	if (CloakedPagesMap) {
+		cloakdata = map_getEntry(CloakedPagesMap, physicalBase);
+	} else {
+		cloakdata = addresslist_find(CloakedPagesList, physicalBase);
+	}
 
-  PCloakedPageData cloakdata;
-  if (CloakedPagesMap)
-    cloakdata=map_getEntry(CloakedPagesMap, physicalBase);
-  else
-    cloakdata=addresslist_find(CloakedPagesList, physicalBase);
+	if (cloakdata) {
+		//found it.  Create an int3 bp at that spot
+		int ID = -1;
+		int offset = physicalAddress & 0xfff;
+		unsigned char *executable = cloakdata->Executable;
 
+		//
+		csEnter(&ChangeRegBPListCS);
+		for (int j = 0; j < ChangeRegBPListPos; j++) {
+			if (ChangeRegBPList[j].Active == 0) {
+				ID = j;
+				break;
+			}
+		}
+		if (ID == -1) {
+			ID = ChangeRegBPListPos;
+			ChangeRegBPListPos++;
 
-  if (cloakdata)
-  {
-    //found it.  Create an int3 bp at that spot
-    int ID=-1;
-    int offset=physicalAddress & 0xfff;
-    unsigned char *executable=cloakdata->Executable;
+			if (ChangeRegBPListPos >= ChangeRegBPListSize) { //realloc the list
+				ChangeRegBPListSize = (ChangeRegBPListSize + 2) * 2;
+				ChangeRegBPList = realloc(ChangeRegBPList, sizeof(ChangeRegBPEntry) * ChangeRegBPListSize);
+			}
+		}
+		ChangeRegBPList[ID].PhysicalAddress = physicalAddress;
+		ChangeRegBPList[ID].originalbyte = executable[offset];
+		ChangeRegBPList[ID].changereginfo = *changereginfo;
+		ChangeRegBPList[ID].cloakdata = cloakdata;
+		ChangeRegBPList[ID].Active = 1;
 
-    //
-    csEnter(&ChangeRegBPListCS);
-    int j;
-    for (j=0; j<ChangeRegBPListPos; j++)
-    {
-      if (ChangeRegBPList[j].Active==0)
-      {
-        ID=j;
-        break;
-      }
-    }
-    if (ID==-1)
-    {
-      ID=ChangeRegBPListPos;
-      ChangeRegBPListPos++;
-      if (ChangeRegBPListPos>=ChangeRegBPListSize) //realloc the list
-      {
-        ChangeRegBPListSize=(ChangeRegBPListSize+2)*2;
-        ChangeRegBPList=realloc(ChangeRegBPList, sizeof(ChangeRegBPEntry)*ChangeRegBPListSize);
-      }
-    }
+		executable[offset] = 0xcc; //int3 bp's will happen now (even on other CPU's)
 
+		csLeave(&ChangeRegBPListCS);
+		result = 0;
+	}
 
-    ChangeRegBPList[ID].PhysicalAddress=physicalAddress;
-    ChangeRegBPList[ID].originalbyte=executable[offset];
-    ChangeRegBPList[ID].changereginfo=*changereginfo;
-    ChangeRegBPList[ID].cloakdata=cloakdata;
-    ChangeRegBPList[ID].Active=1;
-
-    executable[offset]=0xcc; //int3 bp's will happen now (even on other CPU's)
-
-    csLeave(&ChangeRegBPListCS);
-    result=0;
-  }
-
-  csLeave(&CloakedPagesCS);
-
-  return result;
+	csLeave(&CloakedPagesCS);
+	return result;
 }
 
-int ept_cloak_removechangeregonbp(QWORD physicalAddress)
-{
-  int i;
-  int result=1;
-  csEnter(&CloakedPagesCS);
-  csEnter(&ChangeRegBPListCS);
-  for (i=0; i<ChangeRegBPListPos; i++)
-  {
-    if ((ChangeRegBPList[i].Active) && (ChangeRegBPList[i].PhysicalAddress==physicalAddress))
-    {
-      unsigned char *executable=(unsigned char *)ChangeRegBPList[i].cloakdata->Executable;
-      executable[physicalAddress & 0xfff]=ChangeRegBPList[i].originalbyte;
-      ChangeRegBPList[i].Active=0;
+int ept_cloak_removechangeregonbp(QWORD physicalAddress) {
+	int result = 1;
 
-      /*  _wbinvd();
-      vpid_invalidate();
-      ept_invalidate();*/
-      result=0;
-    }
-  }
+	csEnter(&CloakedPagesCS);
+	csEnter(&ChangeRegBPListCS);
 
-  csLeave(&ChangeRegBPListCS);
-  csLeave(&CloakedPagesCS);
+	for (int i = 0; i<ChangeRegBPListPos; i++) {
+		if ((ChangeRegBPList[i].Active) && (ChangeRegBPList[i].PhysicalAddress == physicalAddress)) {
+			unsigned char *executable = (unsigned char*)ChangeRegBPList[i].cloakdata->Executable;
 
-  return result;
+			executable[physicalAddress & 0xfff] = ChangeRegBPList[i].originalbyte;
+			ChangeRegBPList[i].Active = 0;
+			/*  _wbinvd();
+				vpid_invalidate();
+				ept_invalidate();*/
+			result = 0;
+		}
+	}
+
+	csLeave(&ChangeRegBPListCS);
+	csLeave(&CloakedPagesCS);
+
+	return result;
 }
 
-BOOL ept_handleHardwareBreakpoint(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE64 *fxsave)
-{
-  int result=FALSE;
-  if (TraceOnBP)
-  {
-    QWORD RIP=isAMD?currentcpuinfo->vmcb->RIP:vmread(vm_guest_rip);
-    csEnter(&CloakedPagesCS);
+BOOL ept_handleHardwareBreakpoint(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE64 *fxsave) {
+	int result = FALSE;
 
-    nosendchar[getAPICID()]=0;
-    sendstringf("%6: ept_handleHardwareBreakpoint:\n", RIP);
+	if (TraceOnBP) {
+		QWORD RIP = isAMD
+			? currentcpuinfo->vmcb->RIP
+			: vmread(vm_guest_rip);
 
-    if (TraceOnBP && (TraceOnBP->triggered))
-    {
-      regDR6 dr6;
-      QWORD cr3;
-      QWORD fsbase,gsbase, kernelgsbase;
-      kernelgsbase=readMSR(0xc0000102);
-      int isDuetoSingleStep;
+		csEnter(&CloakedPagesCS);
+		nosendchar[getAPICID()] = 0;
 
-      if (isAMD)
-      {
-        dr6.DR6=currentcpuinfo->vmcb->DR6;
-        cr3=currentcpuinfo->vmcb->CR3;
-        fsbase=currentcpuinfo->vmcb->fs_base;
-        gsbase=currentcpuinfo->vmcb->gs_base;
-        isDuetoSingleStep=dr6.BS;
-        //kernelgsbase=currentcpuinfo->vmcb->KernelGsBase; //maybe?
-      }
-      else
-      {
-        dr6.DR6=getDR6();
+		sendstringf("INF: %6: ept_handleHardwareBreakpoint:\n", RIP);
+		if (TraceOnBP && (TraceOnBP->triggered)) {
+			regDR6 dr6;
+			QWORD cr3 = 0;
+			QWORD fsbase = 0, gsbase = 0, kernelgsbase = 0;
 
-        cr3=vmread(vm_guest_cr3);
-        fsbase=vmread(vm_guest_fs_base);
-        gsbase=vmread(vm_guest_gs_base);
+			kernelgsbase = readMSR(0xc0000102);
+			int isDuetoSingleStep = 0;
 
-        isDuetoSingleStep=(vmread(vm_exit_qualification) & 0x4000)!=0;
+			if (isAMD) {
+				dr6.DR6 = currentcpuinfo->vmcb->DR6;
+				cr3 = currentcpuinfo->vmcb->CR3;
+				fsbase = currentcpuinfo->vmcb->fs_base;
+				gsbase = currentcpuinfo->vmcb->gs_base;
+				isDuetoSingleStep = dr6.BS;
+				//kernelgsbase=currentcpuinfo->vmcb->KernelGsBase; //maybe?
+			} else {
+				dr6.DR6 = getDR6();
 
-      }
+				cr3 = vmread(vm_guest_cr3);
+				fsbase = vmread(vm_guest_fs_base);
+				gsbase = vmread(vm_guest_gs_base);
 
+				isDuetoSingleStep = (vmread(vm_exit_qualification) & 0x4000) != 0;
+			}
 
+			sendstringf("INF: Checking state:\n");
+			sendstringf("INF: DR6=%8  DR6.BS=%d isDuetoSingleStep=%d\n", dr6.DR6, dr6.BS, isDuetoSingleStep);
+			sendstringf("INF: TraceOnBP->triggeredcr3=%8\n" , TraceOnBP->triggeredcr3);
+			sendstringf("INF: TraceOnBP->triggeredfsbase=%8\n" , TraceOnBP->triggeredfsbase);
+			sendstringf("INF: TraceOnBP->triggeredgsbase=%8\n" , TraceOnBP->triggeredgsbase);
+			sendstringf("INF: TraceOnBP->cr3=%8\n" , cr3);
+			sendstringf("INF: TraceOnBP->fsbase=%8\n" , fsbase);
+			sendstringf("INF: TraceOnBP->gsbase=%8\n" , gsbase);
+			sendstringf("INF: TraceOnBP->gsbasekernel=%8\n" , kernelgsbase);
 
-      sendstringf("Checking state:\n");
-      sendstringf("DR6=%8  DR6.BS=%d isDuetoSingleStep=%d\n", dr6.DR6, dr6.BS, isDuetoSingleStep);
-      sendstringf("TraceOnBP->triggeredcr3=%8\n" , TraceOnBP->triggeredcr3);
-      sendstringf("TraceOnBP->triggeredfsbase=%8\n" , TraceOnBP->triggeredfsbase);
-      sendstringf("TraceOnBP->triggeredgsbase=%8\n" , TraceOnBP->triggeredgsbase);
-      sendstringf("TraceOnBP->cr3=%8\n" , cr3);
-      sendstringf("TraceOnBP->fsbase=%8\n" , fsbase);
-      sendstringf("TraceOnBP->gsbase=%8\n" , gsbase);
-      sendstringf("TraceOnBP->gsbasekernel=%8\n" , kernelgsbase);
+			if ((isDuetoSingleStep) && (TraceOnBP->triggeredcr3 == cr3) && (TraceOnBP->triggeredfsbase == fsbase) && (TraceOnBP->triggeredgsbase == gsbase)) {
+				recordState(&TraceOnBP->pe, TraceOnBP->datatype, TraceOnBP->numberOfEntries, currentcpuinfo, vmregisters, fxsave);
 
+				TraceOnBP->numberOfEntries++;
+				TraceOnBP->count--;
 
-      if ((isDuetoSingleStep) && (TraceOnBP->triggeredcr3==cr3) && (TraceOnBP->triggeredfsbase==fsbase) && (TraceOnBP->triggeredgsbase==gsbase))
-      {
+				if (TraceOnBP->count <= 0) {
+					TraceOnBP->shouldquit = 1;
+				}
+				//setup resume state
+				RFLAGS flags;
+				flags.value = isAMD
+					? currentcpuinfo->vmcb->RFLAGS
+					: vmread(vm_guest_rflags);
 
-        recordState(&TraceOnBP->pe, TraceOnBP->datatype, TraceOnBP->numberOfEntries, currentcpuinfo, vmregisters, fxsave);
-        TraceOnBP->numberOfEntries++;
+				flags.RF = 1; //resume, but leave the TF flag
 
+				if (TraceOnBP->shouldquit == 0) {
+					sendstringf("INF: Setting TF\n");
+					flags.TF = 1;
+				} else {
+					sendstringf("INF: Finishing trace\n");
+					flags.TF = 0;
+					TraceOnBP->finished = 1;
+				}
 
-        TraceOnBP->count--;
-        if (TraceOnBP->count<=0)
-          TraceOnBP->shouldquit=1;
+				dr6.BS = 0;
+				if (isAMD) {
+					currentcpuinfo->vmcb->RFLAGS = flags.value;
+					currentcpuinfo->vmcb->DR6 = dr6.DR6;
+				} else {
+					sendstringf("bla\n");
+					flags.RF = 1;
+					vmwrite(vm_guest_rflags, flags.value);
 
+					if (flags.TF) {
+						//dr6.BS=1;
+						// vmwrite(vm_pending_debug_exceptions, (1<<14)); //set the TF flag in pending debug registers
+					} else {
+						//dr6.BS=0;
+						//vmwrite(vm_pending_debug_exceptions, vmread(vm_pending_debug_exceptions) & ~(1<<14)); //unset the single step flag
+					}
+					setDR6(dr6.DR6);
+				}
 
+				result = TRUE;
+			} else {
+				sendstringf("INF: unexpected hardware breakpoint while tracing. skipping\n");
+			}
+		} else {
+			sendstringf("INF: tracing hasn't started. skipping\n");
+		}
+		csLeave(&CloakedPagesCS);
+	} else {
+		sendstring("INF: no tracing going on. skipping\n");
+	}
 
-        //setup resume state
-        RFLAGS flags;
-        flags.value=isAMD?currentcpuinfo->vmcb->RFLAGS:vmread(vm_guest_rflags);
-        flags.RF=1; //resume, but leave the TF flag
-
-        if (TraceOnBP->shouldquit==0)
-        {
-          sendstringf("Setting TF\n");
-          flags.TF=1;
-        }
-        else
-        {
-          sendstringf("Finishing trace\n");
-          flags.TF=0;
-          TraceOnBP->finished=1;
-        }
-
-        dr6.BS=0;
-        if (isAMD)
-        {
-          currentcpuinfo->vmcb->RFLAGS=flags.value;
-          currentcpuinfo->vmcb->DR6=dr6.DR6;
-        }
-        else
-        {
-          sendstringf("bla\n");
-          flags.RF=1;
-          vmwrite(vm_guest_rflags, flags.value);
-          if (flags.TF)
-          {
-            //dr6.BS=1;
-           // vmwrite(vm_pending_debug_exceptions, (1<<14)); //set the TF flag in pending debug registers
-
-          }
-          else
-          {
-            //dr6.BS=0;
-           //vmwrite(vm_pending_debug_exceptions, vmread(vm_pending_debug_exceptions) & ~(1<<14)); //unset the single step flag
-          }
-
-          setDR6(dr6.DR6);
-        }
-
-        result=TRUE;
-      }
-      else
-        sendstringf("unexpected hardware breakpoint while tracing. skipping\n");
-    }
-    else
-      sendstringf("tracing hasn't started. skipping\n");
-
-    csLeave(&CloakedPagesCS);
-  }
-  else
-    sendstring("no tracing going on. skipping\n");
-
-  return result;
+	return result;
 }
 
-BOOL ept_handleFrozenThread(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE64 *fxsave, int id)
-//pre: brokenThreadListCS should be locked during this call
-{
-  int result=TRUE;
-  RFLAGS v;
-  v.value=BrokenThreadList[id].state.basic.FLAGS;
-  QWORD RIP=isAMD?currentcpuinfo->vmcb->RIP:vmread(vm_guest_rip);
+BOOL ept_handleFrozenThread(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE64 *fxsave, int id) {
+	//pre: brokenThreadListCS should be locked during this call
+	int result = TRUE;
+	RFLAGS v;
 
-  nosendchar[getAPICID()]=0;
-  //sendstringf("ept_handleFrozenThread: RIP=%6\n",RIP);
+	v.value = BrokenThreadList[id].state.basic.FLAGS;
+	QWORD RIP = isAMD
+		? currentcpuinfo->vmcb->RIP
+		: vmread(vm_guest_rip);
 
-  BrokenThreadList[id].state.basic.Count++;//heartbeat to show it's still triggering the BP
-  if (BrokenThreadList[id].continueMethod)
-  {
-    nosendchar[getAPICID()]=0;
-    sendstringf("continueMethod is not 0\n");
+	nosendchar[getAPICID()] = 0;
+	//sendstringf("ept_handleFrozenThread: RIP=%6\n",RIP);
 
+	BrokenThreadList[id].state.basic.Count++;//heartbeat to show it's still triggering the BP
+	if (BrokenThreadList[id].continueMethod) {
+		nosendchar[getAPICID()] = 0;
+		sendstringf("INF: continueMethod is not 0\n");
 
+		//restore the state according to the saved state (could have been changed) and do a single step or run  (this also undoes the state used value in rax, which is good)
+		if (isAMD) {
+			currentcpuinfo->vmcb->RIP = BrokenThreadList[id].state.basic.RIP;
+			currentcpuinfo->vmcb->RAX = BrokenThreadList[id].state.basic.RAX;
+			currentcpuinfo->vmcb->RSP = BrokenThreadList[id].state.basic.RSP;
 
+			v.RF = 1; //tell the watch handler to skip this if it returns at the same spot again
+			currentcpuinfo->vmcb->RFLAGS = v.value;
+		} else {
+			vmregisters->rax = BrokenThreadList[id].state.basic.RAX;
+			vmwrite(vm_guest_rip, BrokenThreadList[id].state.basic.RIP);
+			vmwrite(vm_guest_rsp, BrokenThreadList[id].state.basic.RSP);
 
-    //restore the state according to the saved state (could have been changed) and do a single step or run  (this also undoes the state used value in rax, which is good)
-    if (isAMD)
-    {
-      currentcpuinfo->vmcb->RIP=BrokenThreadList[id].state.basic.RIP;
-      currentcpuinfo->vmcb->RAX=BrokenThreadList[id].state.basic.RAX;
-      currentcpuinfo->vmcb->RSP=BrokenThreadList[id].state.basic.RSP;
+			vmwrite(vm_guest_interruptability_state, 1); //tell the watch handler to skip this if it returns at the same spot again
+		}
+		vmregisters->rbx = BrokenThreadList[id].state.basic.RBX;
+		vmregisters->rcx = BrokenThreadList[id].state.basic.RCX;
+		vmregisters->rdx = BrokenThreadList[id].state.basic.RDX;
+		vmregisters->rsi = BrokenThreadList[id].state.basic.RSI;
+		vmregisters->rdi = BrokenThreadList[id].state.basic.RDI;
+		vmregisters->rbp = BrokenThreadList[id].state.basic.RBP;
+		vmregisters->r8 = BrokenThreadList[id].state.basic.R8;
+		vmregisters->r9 = BrokenThreadList[id].state.basic.R9;
+		vmregisters->r10 = BrokenThreadList[id].state.basic.R10;
+		vmregisters->r11 = BrokenThreadList[id].state.basic.R11;
+		vmregisters->r12 = BrokenThreadList[id].state.basic.R12;
+		vmregisters->r13 = BrokenThreadList[id].state.basic.R13;
+		vmregisters->r14 = BrokenThreadList[id].state.basic.R14;
+		vmregisters->r15 = BrokenThreadList[id].state.basic.R15;
 
-      v.RF=1; //tell the watch handler to skip this if it returns at the same spot again
-      currentcpuinfo->vmcb->RFLAGS=v.value;
-    }
-    else
-    {
-      vmregisters->rax=BrokenThreadList[id].state.basic.RAX;
-      vmwrite(vm_guest_rip,BrokenThreadList[id].state.basic.RIP);
-      vmwrite(vm_guest_rsp, BrokenThreadList[id].state.basic.RSP);
+		*fxsave = BrokenThreadList[id].state.fpudata;
+		if (BrokenThreadList[id].continueMethod == 1) {
+			sendstringf("INF: This is a single step, so setting single step mode\n");
+			//set single stepping
+			vmx_enableSingleStepMode();
+			vmx_addSingleSteppingReason(currentcpuinfo, SSR_STEPANDBREAK, id); //restore rip back to int3 bp after the step
 
-      vmwrite(vm_guest_interruptability_state,1); //tell the watch handler to skip this if it returns at the same spot again
-    }
-    vmregisters->rbx=BrokenThreadList[id].state.basic.RBX;
-    vmregisters->rcx=BrokenThreadList[id].state.basic.RCX;
-    vmregisters->rdx=BrokenThreadList[id].state.basic.RDX;
-    vmregisters->rsi=BrokenThreadList[id].state.basic.RSI;
-    vmregisters->rdi=BrokenThreadList[id].state.basic.RDI;
-    vmregisters->rbp=BrokenThreadList[id].state.basic.RBP;
-    vmregisters->r8=BrokenThreadList[id].state.basic.R8;
-    vmregisters->r9=BrokenThreadList[id].state.basic.R9;
-    vmregisters->r10=BrokenThreadList[id].state.basic.R10;
-    vmregisters->r11=BrokenThreadList[id].state.basic.R11;
-    vmregisters->r12=BrokenThreadList[id].state.basic.R12;
-    vmregisters->r13=BrokenThreadList[id].state.basic.R13;
-    vmregisters->r14=BrokenThreadList[id].state.basic.R14;
-    vmregisters->r15=BrokenThreadList[id].state.basic.R15;
+			BrokenThreadList[id].watchid = -1; //set it as single stepping
+		} else {
+			BrokenThreadList[id].inuse = 0; //continue (on purpuse)
+			BrokenThreadList[id].continueMethod = 0;
 
-    *fxsave=BrokenThreadList[id].state.fpudata;
+			sendstringf("INF: Just continue.  It should continue at %2:%6\n",BrokenThreadList[id].state.basic.CS, BrokenThreadList[id].state.basic.RIP);
+			if (isAMD) {
+				sendstringf("INF: It will continue at %2:%6\n",(unsigned char)currentcpuinfo->vmcb->cs_selector, currentcpuinfo->vmcb->RIP);
+			} else {
+				sendstringf("INF: It will continue at %2:%6\n",(unsigned char)vmread(vm_guest_cs), vmread(vm_guest_rip));
+			}
 
-    if (BrokenThreadList[id].continueMethod==1)
-    {
-      sendstringf("This is a single step, so setting single step mode\n");
-      //set single stepping
-      vmx_enableSingleStepMode();
-      vmx_addSingleSteppingReason(currentcpuinfo, SSR_STEPANDBREAK, id); //restore rip back to int3 bp after the step
+			//do one instruction at least
+			if (isAMD) {
+				if (v.IF) {
+					currentcpuinfo->vmcb->INTERRUPT_SHADOW = 1;
+				}
+			} else {
+				vmwrite(vm_guest_interruptability_state,1); //blocking by sti
+			}
+		}
+	} else {
+		//RFLAGS v2;
+		//v2.value=currentcpuinfo->vmcb->RFLAGS;
 
-      BrokenThreadList[id].watchid=-1; //set it as single stepping
-    }
-    else
-    {
-      BrokenThreadList[id].inuse=0; //continue (on purpuse)
-      BrokenThreadList[id].continueMethod=0;
+		//sendstringf("%d: Still frozen at %6  CR8=%x stored: IF=%d RF=%d current: IF=%d rd=%d INTERRUPT_SHADOW=%d EFER=%x FMASK=%x\n", currentcpuinfo->cpunr, BrokenThreadList[id].state.basic.RIP, getCR8(), v.IF, v.RF, v2.IF, v2.RF, currentcpuinfo->vmcb->INTERRUPT_SHADOW,
+		//    currentcpuinfo->vmcb->EFER,
+		//    currentcpuinfo->vmcb->SFMASK);
+	}
 
-      sendstringf("Just continue.  It should continue at %2:%6\n",BrokenThreadList[id].state.basic.CS, BrokenThreadList[id].state.basic.RIP);
-      if (isAMD)
-      {
-        sendstringf("It will continue at %2:%6\n",(unsigned char)currentcpuinfo->vmcb->cs_selector, currentcpuinfo->vmcb->RIP);
-      }
-      else
-      {
-        sendstringf("It will continue at %2:%6\n",(unsigned char)vmread(vm_guest_cs), vmread(vm_guest_rip));
-      }
-
-
-      //do one instruction at least
-      if (isAMD)
-      {
-        if (v.IF)
-          currentcpuinfo->vmcb->INTERRUPT_SHADOW=1;
-      }
-      else
-      {
-        vmwrite(vm_guest_interruptability_state,1); //blocking by sti
-      }
-
-
-
-    }
-  }
-  else
-  {
-    //RFLAGS v2;
-    //v2.value=currentcpuinfo->vmcb->RFLAGS;
-
-    //sendstringf("%d: Still frozen at %6  CR8=%x stored: IF=%d RF=%d current: IF=%d rd=%d INTERRUPT_SHADOW=%d EFER=%x FMASK=%x\n", currentcpuinfo->cpunr, BrokenThreadList[id].state.basic.RIP, getCR8(), v.IF, v.RF, v2.IF, v2.RF, currentcpuinfo->vmcb->INTERRUPT_SHADOW,
-    //    currentcpuinfo->vmcb->EFER,
-    //    currentcpuinfo->vmcb->SFMASK);
-
-
-  }
-
-  return result;
+	return result;
 }
 
-BOOL ept_handleSoftwareBreakpoint(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE64 *fxsave)
-{
+BOOL ept_handleSoftwareBreakpoint(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE64 *fxsave) {
   //check if it is a cloaked instruction
   int i;
-  int result=FALSE;
-  QWORD RIP=isAMD?currentcpuinfo->vmcb->RIP:vmread(vm_guest_rip);
+  int result = FALSE;
+  QWORD RIP = isAMD
+	  ? currentcpuinfo->vmcb->RIP
+	  : vmread(vm_guest_rip);
 
-  nosendchar[getAPICID()]=0;
-
-
+  nosendchar[getAPICID()] = 0;
   //convert RIP into a physical address  (note that RIP has not been decreased by 1 yet)
 
-
-  int notpaged;
-  QWORD PA=getPhysicalAddressVM(currentcpuinfo, RIP, &notpaged);
+  int notpaged = 0;
+  QWORD PA = getPhysicalAddressVM(currentcpuinfo, RIP, &notpaged);
 
  // sendstringf("ept_handleSoftwareBreakpoint. RFLAGS=%x\n", RIP, PA);
 
-  if (notpaged==0) //should be since it's a software interrupt...
-  {
+  if (notpaged == 0) { //should be since it's a software interrupt...
     //sendstringf("paged\n");
     csEnter(&BrokenThreadListCS);
-    if (BrokenThreadList && BrokenThreadListPos)
-    {
-      int shouldHaveBeenHandled=0;
-      //sendstringf("Checking the broken threadlist");
-      for (i=0; i<BrokenThreadListPos; i++)
-      {
-        if (BrokenThreadList[i].inuse)
-        {
-          QWORD cr3;
-          QWORD rip,rax;
 
-          if (isAMD)
-          {
-            cr3=currentcpuinfo->vmcb->CR3;
-            rip=currentcpuinfo->vmcb->RIP;
-            rax=currentcpuinfo->vmcb->RAX;
-          }
-          else
-          {
-            cr3=vmread(vm_guest_cr3);
-            rip=vmread(vm_guest_rip);
-            rax=vmregisters->rax;
+    if (BrokenThreadList && BrokenThreadListPos) {
+      int shouldHaveBeenHandled = 0;
+      //sendstringf("Checking the broken threadlist");
+      for (int i = 0; i < BrokenThreadListPos; i++) {
+        if (BrokenThreadList[i].inuse) {
+          QWORD cr3 = 0;
+          QWORD rip = 0, rax = 0;
+
+          if (isAMD) {
+            cr3 = currentcpuinfo->vmcb->CR3;
+            rip = currentcpuinfo->vmcb->RIP;
+            rax = currentcpuinfo->vmcb->RAX;
+          } else {
+            cr3 = vmread(vm_guest_cr3);
+            rip = vmread(vm_guest_rip);
+            rax = vmregisters->rax;
           }
 
           //rsp might be a good detection point as well
-
-
           //warning: In windows, kernelmode gsbase changes depending on the cpu so can not be used as identifier then
 
           //check if it's matches this thread
