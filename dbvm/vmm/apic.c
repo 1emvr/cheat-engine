@@ -38,15 +38,15 @@ int getHighestPendingInterrupt() {
 }
 
 DWORD ReadAPICRegister(DWORD reg) {
-  DWORD result = 0;
-  QWORD APIC_PA = readMSR(IA32_APICBASE_MSR) & MAXPHYADDRMASKPB;
-  PAPIC apic = mapPhysicalMemory(APIC_PA, 4096);
+	DWORD result = 0;
+	QWORD APIC_PA = readMSR(IA32_APICBASE_MSR) & MAXPHYADDRMASKPB;
+	PAPIC apic = mapPhysicalMemory(APIC_PA, 4096);
 
-  SetPageToWriteThrough(apic);
-  result = *(volatile DWORD*)((UINT64)apic + (reg * 0x10));
+	SetPageToWriteThrough(apic);
+	result = *(volatile DWORD*)((UINT64)apic + (reg * 0x10));
 
-  unmapPhysicalMemory(apic,4096);
-  return result;
+	unmapPhysicalMemory(apic,4096);
+	return result;
 }
 
 DWORD WriteAPICRegister(DWORD reg, DWORD value) {
@@ -54,7 +54,7 @@ DWORD WriteAPICRegister(DWORD reg, DWORD value) {
 }
 
 void apic_eoi(void) {
-  *(volatile DWORD *)(IA32_APIC_BASE+0xb0) = 0;
+	*(volatile DWORD*)(IA32_APIC_BASE + 0xb0) = 0;
 }
 
 void apic_sendWaitInterrupt(BYTE apicid) {

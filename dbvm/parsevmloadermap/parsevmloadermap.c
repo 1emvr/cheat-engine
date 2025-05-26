@@ -50,7 +50,7 @@ int main(void) {
 	unsigned int startoffreemem = startofbss + sizeofbss;
 	int count;
 
-	startoffreemem += 4096-(startoffreemem % 4096); // start of page-aligned free memory
+	startoffreemem += 4096 - (startoffreemem % 4096); // start of page-aligned free memory
 	printf("INF: startoffreemem=%x\n",startoffreemem);
 
 	//seek to the end

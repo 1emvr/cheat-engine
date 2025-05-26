@@ -472,12 +472,11 @@ void sendchar(char c) {
 #if (!defined SERIALPORT) || (SERIALPORT == 0)
 	return;
 #endif
-
 	if ((c == '\r') || (nosendchar[getAPICID()])) {
 		return;
 	}
 
-	char x = inportb(SERIALPORT+5);
+	char x = inportb(SERIALPORT + 5);
 	while ((x & 0x40) != 0x40) {
 		x = inportb(SERIALPORT + 5);
 	}
@@ -493,49 +492,41 @@ void sendchar(char c) {
 	}
 }
 
-// TODO: leaving off here...
 void waitforkeypress(void) {
-  char x=inportb(0x60);
-
-  while (x==inportb(0x60)) ;
+  char x = inportb(0x60);
+  while (x == inportb(0x60));
 }
 
-char getchar(void)
-{
-/* returns 0 when no char is pressed
-	 use readstring to wait for keypresses */
+char getchar(void) {
+	/* returns 0 when no char is pressed
+	   use readstring to wait for keypresses */
 #if (!defined SERIALPORT) || (SERIALPORT == 0)
 	return 1;
 #else
-	if (inportb(SERIALPORT+5) & 0x1)
-    return inportb(SERIALPORT);
-	else
+	if (inportb(SERIALPORT + 5) & 0x1) {
+		return inportb(SERIALPORT);
+	} else {
 		return 0;
+	}
 #endif
-
-
 }
 
-char waitforchar(void)
-{
-  char c=0;
-	while (c==0)
-	  c=getchar();
+char waitforchar(void) {
+	char c = 0;
+	while (c == 0) {
+		c = getchar();
+	}
 
-  return c;
+	return c;
 }
 
-
-int readstring(char *s, int minlength, int maxlength)
-{
-	int i=0;
+int readstring(char *s, int minlength, int maxlength) {
+	int i = 0;
 	//keeps reading till it hits minlength, but can go over till maxlength (depending on the size of the uart buffer)
-	while (i<minlength)
-	{
-    s[i]=waitforchar();
-		if ((s[i]==13) || (s[i]==10))
-		{
-			s[i]=0;
+	while (i < minlength) {
+		s[i] = waitforchar();
+		if ((s[i] == 13) || (s[i] == 10)) {
+			s[i] = 0;
 			return i;
 		}
 		sendchar(s[i]);
@@ -543,169 +534,148 @@ int readstring(char *s, int minlength, int maxlength)
 		if (s[i]) i++;
 	}
 
-  s[i]=0;
+	s[i] = 0;
 
-  //minlength reached
-  while ((i<maxlength) && (s[i]))
-	{
-	  s[i]=getchar();
+	//minlength reached
+	while ((i < maxlength) && (s[i])) {
+		s[i] = getchar();
 		i++;
-		if (s[i])
+		if (s[i]) {
 			sendchar(s[i]);
+		}
 	}
 
 	return i;
 }
 
 
-void printchar(char c, int x, int y, char foreground, char background)
-{
-  PTEXTVIDEO tv=(PTEXTVIDEO)0x0b8000;
-  tv[y*80+x].character=c;
-  tv[y*80+x].foregroundcolor=foreground;
-	tv[y*80+x].backgroundcolor=background;
+void printchar(char c, int x, int y, char foreground, char background) {
+	PTEXTVIDEO tv = (PTEXTVIDEO)0x0b8000;
+	tv[y * 80 + x].character = c;
+	tv[y * 80 + x].foregroundcolor = foreground;
+	tv[y * 80 + x].backgroundcolor = background;
 }
 
-void getdisplaychar(int x, int y, PTEXTVIDEO charinfo)
-{
-  PTEXTVIDEO tv=(PTEXTVIDEO)0x0b8000;
-  *charinfo=tv[y*80+x];
+void getdisplaychar(int x, int y, PTEXTVIDEO charinfo) {
+	PTEXTVIDEO tv = (PTEXTVIDEO)0x0b8000;
+	*charinfo = tv[y * 80 + x];
 }
 
-
-void printstring(char *s, int x, int y, char foreground, char background)
-{
-  int i;
-  for (i=0; s[i]; i++,x++)
-    printchar(s[i],x%80,y+(x/80),foreground,background);
+void printstring(char *s, int x, int y, char foreground, char background) {
+	for (int i = 0; s[i]; i++, x++) {
+		printchar(s[i], x % 80, y + (x / 80), foreground, background);
+	}
 }
 
-void movelinesup(void)
-{
-  PTEXTVIDEO tv=(PTEXTVIDEO)0x0b8000;
-  TEXTVIDEO thischar;
+void movelinesup(void) {
+	PTEXTVIDEO tv = (PTEXTVIDEO)0x0b8000;
+	TEXTVIDEO thischar;
 
-  int x,y;
-  for (y=0; y<25; y++)  //change y=0 to y=7 for a nice effect
-  {
-    for (x=0; x<80; x++)
-    {
-      //move this char to the one at top
-      getdisplaychar(x,y,&thischar);
-      tv[(y-1)*80+x]=thischar;
-    }
-  }
+	int x = 0, y = 0;
+	for (; y < 25; y++)  {//change y=0 to y=7 for a nice effect
+		for (; x < 80; x++) {
+			//move this char to the one at top
+			getdisplaychar(x, y, &thischar);
+			tv[(y - 1) * 80 + x] = thischar;
+		}
+	}
 
-  y=24;
-  thischar.character=' ';
-  thischar.backgroundcolor=0;
-  thischar.foregroundcolor=15;
-  for (x=0; x<80; x++)
-    tv[y*80+x]=thischar;
+	y = 24;
+	thischar.character = ' ';
+	thischar.backgroundcolor = 0;
+	thischar.foregroundcolor = 15;
 
+	for (x = 0; x < 80; x++){
+		tv[y * 80 + x] = thischar;
+	}
 }
 
-void nextline(void)
-/*
- * move the 'cursor' down one line
- */
-{
-  currentdisplayrow=0; //all the way to the left
+// TODO: leaving off here...
+void nextline(void) {
+	/*
+	 * move the 'cursor' down one line
+	 */
+	currentdisplayrow = 0; //all the way to the left
 
-  if (currentdisplayline>=24)
-  {
-    movelinesup(); //all other lines go up one line and currentdisplayline stays the same
-    currentdisplayline=24; //just set it in case 'something' sets it different
-  }
-  else
-    currentdisplayline++;
+	if (currentdisplayline >= 24) {
+		movelinesup(); //all other lines go up one line and currentdisplayline stays the same
+		currentdisplayline = 24; //just set it in case 'something' sets it different
+	} else {
+		currentdisplayline++;
+	}
 }
 
-void updateCursor(void)
-{
-  int cursorpos;
-  cursorpos=currentdisplayline*80+currentdisplayrow;
+void updateCursor(void) {
+	int cursorpos = 0;
+	cursorpos = currentdisplayline * 80 + currentdisplayrow;
 
-
-  outportb(0x3D4, 14);
-  outportb(0x3D5, (cursorpos>>8));
-  outportb(0x3D4, 15);
-  outportb(0x3D5, cursorpos);
+	outportb(0x3D4, 14);
+	outportb(0x3D5, (cursorpos>>8));
+	outportb(0x3D4, 15);
+	outportb(0x3D5, cursorpos);
 }
 
-void displayline(char *s, ...)
-/* Displays a line on the screen and sets the 'currentline' down one pos
- */
-{
+void displayline(char *s, ...) {
+	/* Displays a line on the screen and sets the 'currentline' down one pos
+	*/
+	__builtin_va_list arglist;
+	char temps[200];
 
-  __builtin_va_list arglist;
-  char temps[200];
-  int sl,i;
-
-  __builtin_va_start(arglist,s);
-  sl=vbuildstring(temps,200,s,arglist);
-  __builtin_va_end(arglist);
+	__builtin_va_start(arglist, s);
+	int sl = vbuildstring(temps, 200, s, arglist);
+	__builtin_va_end(arglist);
 
 
-  if (sl>0)
-  {
-    csEnter(&sendstringfCS);
-    csEnter(&sendstringCS);
+	if (sl > 0) {
+		csEnter(&sendstringfCS);
+		csEnter(&sendstringCS);
 
-    for (i=0; i<sl; i++)
-    {
-      if (temps[i]=='\n')
-      {
-        nextline();
-        continue;
-      }
+		for (int i = 0; i < sl; i++) {
+			if (temps[i]=='\n') {
+				nextline();
+				continue;
+			}
 
-      if (temps[i]=='\r') //not handled
-        continue;
+			if (temps[i] == '\r') {//not handled
+				continue;
+			}
+			printchar(temps[i], currentdisplayrow, currentdisplayline, 15, 0);
+			currentdisplayrow++;
 
+			if ((currentdisplayrow % 80) == 0) {
+				nextline();
+			}
+		}
 
-      printchar(temps[i],currentdisplayrow,currentdisplayline,15,0);
-      currentdisplayrow++;
+		updateCursor();
 
-      if ((currentdisplayrow % 80)==0)
-        nextline();
-    }
-
-    updateCursor();
-
-    csLeave(&sendstringCS);
-    csLeave(&sendstringfCS);
-  }
+		csLeave(&sendstringCS);
+		csLeave(&sendstringfCS);
+	}
 }
 
-int generateCRC(unsigned char *ptr, int size)
-{
-  int i=0;
-  unsigned int cval=0;
-  while (i<size)
-  {
-    cval = ( ptr[i] + cval ) % 65536;
-    i++;
-  }
+int generateCRC(unsigned char *ptr, int size) {
+	int i = 0;
+	unsigned int cval = 0;
 
-  return cval;
+	while (i < size) {
+		cval = (ptr[i] + cval) % 65536;
+		i++;
+	}
+	return cval;
 }
 
-void showstatec(ULONG *stack)
-/* send the state of the registers to the serial port */
-{
-  sendstringf("INF: idtbase=%8 gdtbase=%8\n\r",stack[0],stack[1]);
-  sendstringf("INF: cr3=%8 cr2=%8 cr1=%8 cr0=%8\n\r",stack[2],stack[3],stack[4],stack[5]);
-  sendstringf("INF: eflags=%8\n\r",stack[6]);
+void showstatec(ULONG *stack) {
+	/* send the state of the registers to the serial port */
+	sendstringf("INF: idtbase=%8 gdtbase=%8\n\r", stack[0], stack[1]);
+	sendstringf("INF: cr3=%8 cr2=%8 cr1=%8 cr0=%8\n\r", stack[2], stack[3], stack[4], stack[5]);
+	sendstringf("INF: eflags=%8\n\r",stack[6]);
 
-
-  /*
-  sendstringf("cr0=%8\n\r",getCR0());
-  sendstringf("cr3=%8\n\r",getCR3());
-  sendstringf("cr4=%8\n\r",getCR4());
-  sendstringf("GDT base=%8\n\r",getGDTbase());
-  sendstringf("IDT base=%8\n\r",getIDTbase());
-  */
-
-
+	/*
+	   sendstringf("cr0=%8\n\r",getCR0());
+	   sendstringf("cr3=%8\n\r",getCR3());
+	   sendstringf("cr4=%8\n\r",getCR4());
+	   sendstringf("GDT base=%8\n\r",getGDTbase());
+	   sendstringf("IDT base=%8\n\r",getIDTbase());
+	   */
 }
