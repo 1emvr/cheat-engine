@@ -1243,2663 +1243,2359 @@ BOOL ept_handleFrozenThread(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, F
 }
 
 BOOL ept_handleSoftwareBreakpoint(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE64 *fxsave) {
-  //check if it is a cloaked instruction
-  int i;
-  int result = FALSE;
-  QWORD RIP = isAMD
-	  ? currentcpuinfo->vmcb->RIP
-	  : vmread(vm_guest_rip);
+	//check if it is a cloaked instruction
+	int result = FALSE;
+	QWORD RIP = isAMD
+		? currentcpuinfo->vmcb->RIP
+		: vmread(vm_guest_rip);
 
-  nosendchar[getAPICID()] = 0;
-  //convert RIP into a physical address  (note that RIP has not been decreased by 1 yet)
+	nosendchar[getAPICID()] = 0;
+	//convert RIP into a physical address  (note that RIP has not been decreased by 1 yet)
 
-  int notpaged = 0;
-  QWORD PA = getPhysicalAddressVM(currentcpuinfo, RIP, &notpaged);
+	int notpaged = 0;
+	QWORD PA = getPhysicalAddressVM(currentcpuinfo, RIP, &notpaged);
 
- // sendstringf("ept_handleSoftwareBreakpoint. RFLAGS=%x\n", RIP, PA);
+	// sendstringf("ept_handleSoftwareBreakpoint. RFLAGS=%x\n", RIP, PA);
 
-  if (notpaged == 0) { //should be since it's a software interrupt...
-    //sendstringf("paged\n");
-    csEnter(&BrokenThreadListCS);
+	if (notpaged == 0) { //should be since it's a software interrupt...
+						 //sendstringf("paged\n");
+		csEnter(&BrokenThreadListCS);
 
-    if (BrokenThreadList && BrokenThreadListPos) {
-      int shouldHaveBeenHandled = 0;
-      //sendstringf("Checking the broken threadlist");
-      for (int i = 0; i < BrokenThreadListPos; i++) {
-        if (BrokenThreadList[i].inuse) {
-          QWORD cr3 = 0;
-          QWORD rip = 0, rax = 0;
+		if (BrokenThreadList && BrokenThreadListPos) {
+			int shouldHaveBeenHandled = 0;
+			//sendstringf("Checking the broken threadlist");
+			for (int i = 0; i < BrokenThreadListPos; i++) {
+				if (BrokenThreadList[i].inuse) {
+					QWORD cr3 = 0;
+					QWORD rip = 0, rax = 0;
 
-          if (isAMD) {
-            cr3 = currentcpuinfo->vmcb->CR3;
-            rip = currentcpuinfo->vmcb->RIP;
-            rax = currentcpuinfo->vmcb->RAX;
-          } else {
-            cr3 = vmread(vm_guest_cr3);
-            rip = vmread(vm_guest_rip);
-            rax = vmregisters->rax;
-          }
+					if (isAMD) {
+						cr3 = currentcpuinfo->vmcb->CR3;
+						rip = currentcpuinfo->vmcb->RIP;
+						rax = currentcpuinfo->vmcb->RAX;
+					} else {
+						cr3 = vmread(vm_guest_cr3);
+						rip = vmread(vm_guest_rip);
+						rax = vmregisters->rax;
+					}
 
-          //rsp might be a good detection point as well
-          //warning: In windows, kernelmode gsbase changes depending on the cpu so can not be used as identifier then
+					//rsp might be a good detection point as well
+					//warning: In windows, kernelmode gsbase changes depending on the cpu so can not be used as identifier then
 
-          //check if it's matches this thread
-          if ((cr3==BrokenThreadList[i].state.basic.CR3) && ((rip==BrokenThreadList[i].KernelModeLoop) || (rip==BrokenThreadList[i].UserModeLoop)))
-          {
-            shouldHaveBeenHandled=1;
+					//check if it's matches this thread
+					if ((cr3 == BrokenThreadList[i].state.basic.CR3) && ((rip == BrokenThreadList[i].KernelModeLoop) || (rip == BrokenThreadList[i].UserModeLoop))) {
+						shouldHaveBeenHandled = 1;
 
-            if ((QWORD)rax!=(QWORD)i) continue; //rax should match the brokenthreadlist id
+						if ((QWORD)rax != (QWORD)i) continue; //rax should match the brokenthreadlist id
 
-            result=ept_handleFrozenThread(currentcpuinfo, vmregisters, fxsave, i);
-            break;
-          }
-        }
-      }
+						result = ept_handleFrozenThread(currentcpuinfo, vmregisters, fxsave, i);
+						break;
+					}
+				}
+			}
+			/*
+			   if ((!result) && (shouldHaveBeenHandled))
+			   {
+			   while (1);
+			   }
+			   */
 
-/*
-      if ((!result) && (shouldHaveBeenHandled))
-      {
-        while (1);
-      }
-      */
+		}
+		csLeave(&BrokenThreadListCS);
+		if (result) return result; //it was a frozen thread
 
-    }
-    csLeave(&BrokenThreadListCS);
-    if (result) return result; //it was a frozen thread
+		csEnter(&CloakedPagesCS);
 
-
-    csEnter(&CloakedPagesCS);
-
-    //if (TraceOnBP)
-    //  sendstringf("TraceOnBP->PhysicalAddres=%6  PA=%6\n", TraceOnBP->PhysicalAddress, PA);
+		//if (TraceOnBP)
+		//  sendstringf("TraceOnBP->PhysicalAddres=%6  PA=%6\n", TraceOnBP->PhysicalAddress, PA);
 
 
-    if (TraceOnBP && (TraceOnBP->PhysicalAddress==PA))
-    {
+		if (TraceOnBP && (TraceOnBP->PhysicalAddress == PA)) {
+			if (TraceOnBP->triggered) {
+				sendstringf("INF: already triggered\n");
+				csLeave(&CloakedPagesCS);
+				return TRUE; //try again (something else got it first and likely restored the byte)
+			}
 
-      if (TraceOnBP->triggered)
-      {
-        sendstringf("already triggered\n");
-        csLeave(&CloakedPagesCS);
-        return TRUE; //try again (something else got it first and likely restored the byte)
-      }
+			//todo: if option is to step through interrupts use vmx_enableSingleStepMode() and just follow this cpu instead of process
 
-      //todo: if option is to step through interrupts use vmx_enableSingleStepMode() and just follow this cpu instead of process
+			//for now, just set stepping (which is visible to interrupts and pushf in that code)
+			sendstringf("INF: setting TF\n");
 
-      //for now, just set stepping (which is visible to interrupts and pushf in that code)
-      sendstringf("setting TF\n");
+			RFLAGS flags;
+			flags.value = isAMD
+				? currentcpuinfo->vmcb->RFLAGS
+				: vmread(vm_guest_rflags);
 
-      RFLAGS flags;
-      flags.value=isAMD?currentcpuinfo->vmcb->RFLAGS:vmread(vm_guest_rflags);
-      flags.TF=1;
-
-
-      if (isAMD)
-        currentcpuinfo->vmcb->RFLAGS=flags.value;
-      else
-        vmwrite(vm_guest_rflags, flags.value);
-
-
-      int offset=TraceOnBP->PhysicalAddress & 0xfff;
-      unsigned char *executable=(unsigned char *)TraceOnBP->cloakdata->Executable;
-      executable[offset]=TraceOnBP->originalbyte;
-
-      //save the first state
-
-      recordState(&TraceOnBP->pe, TraceOnBP->datatype, TraceOnBP->numberOfEntries, currentcpuinfo, vmregisters, fxsave);
-      TraceOnBP->numberOfEntries++;
-      TraceOnBP->count--;
+			flags.TF = 1;
+			if (isAMD) {
+				currentcpuinfo->vmcb->RFLAGS=flags.value;
+			} else {
+				vmwrite(vm_guest_rflags, flags.value);
+			}
 
 
-      TraceOnBP->triggered=1;
-      TraceOnBP->triggeredcr3=isAMD?currentcpuinfo->vmcb->CR3:vmread(vm_guest_cr3);
-      TraceOnBP->triggeredgsbase=isAMD?currentcpuinfo->vmcb->gs_base:vmread(vm_guest_gs_base);
-      TraceOnBP->triggeredfsbase=isAMD?currentcpuinfo->vmcb->fs_base:vmread(vm_guest_fs_base);
+			int offset = TraceOnBP->PhysicalAddress & 0xfff;
+			unsigned char *executable = (unsigned char*)TraceOnBP->cloakdata->Executable;
+			executable[offset] = TraceOnBP->originalbyte;
 
-      sendstringf("TraceOnBP->triggeredcr3=%6\n", TraceOnBP->triggeredcr3);
-      sendstringf("TraceOnBP->triggeredfsbase=%6\n", TraceOnBP->triggeredfsbase);
-      sendstringf("TraceOnBP->triggeredgsbase=%6\n", TraceOnBP->triggeredgsbase);
+			//save the first state
+			recordState(&TraceOnBP->pe, TraceOnBP->datatype, TraceOnBP->numberOfEntries, currentcpuinfo, vmregisters, fxsave);
+			TraceOnBP->numberOfEntries++;
+			TraceOnBP->count--;
 
-      csLeave(&CloakedPagesCS);
+			TraceOnBP->triggered = 1;
+			TraceOnBP->triggeredcr3 = isAMD ? currentcpuinfo->vmcb->CR3 : vmread(vm_guest_cr3);
+			TraceOnBP->triggeredgsbase = isAMD ? currentcpuinfo->vmcb->gs_base : vmread(vm_guest_gs_base);
+			TraceOnBP->triggeredfsbase = isAMD ? currentcpuinfo->vmcb->fs_base : vmread(vm_guest_fs_base);
 
-      sendstringf("returning true\n");
-      sendstringf("currentcpuinfo->vmcb->InterceptExceptions=%6\n", currentcpuinfo->vmcb->InterceptExceptions);
-      return TRUE;
-    }
+			sendstringf("INF: TraceOnBP->triggeredcr3=%6\n", TraceOnBP->triggeredcr3);
+			sendstringf("INF: TraceOnBP->triggeredfsbase=%6\n", TraceOnBP->triggeredfsbase);
+			sendstringf("INF: TraceOnBP->triggeredgsbase=%6\n", TraceOnBP->triggeredgsbase);
 
+			csLeave(&CloakedPagesCS);
 
+			sendstringf("INF: returning true\n");
+			sendstringf("INF: currentcpuinfo->vmcb->InterceptExceptions=%6\n", currentcpuinfo->vmcb->InterceptExceptions);
+			return TRUE;
+		}
 
-    csEnter(&ChangeRegBPListCS);
-    for (i=0; i<ChangeRegBPListPos; i++)
-    {
-      if (ChangeRegBPList[i].PhysicalAddress==PA)
-      {
-        if (ChangeRegBPList[i].Active)
-        {
-          QWORD oldRIP=RIP;
-          //it's a match
-          //Todo: Only change if the processID matches  (todo: Add a getProcessID option provided by the OS based caller)
-          //For now, make sure that the physical page is not shared, or that the register change is compatible with different processes (e.g kernelmode only, or a Flag change)
+		csEnter(&ChangeRegBPListCS);
+		for (int i = 0; i < ChangeRegBPListPos; i++) {
+			if (ChangeRegBPList[i].PhysicalAddress == PA) {
+				if (ChangeRegBPList[i].Active) {
+					QWORD oldRIP = RIP;
+					//it's a match
+					//Todo: Only change if the processID matches  (todo: Add a getProcessID option provided by the OS based caller)
+					//For now, make sure that the physical page is not shared, or that the register change is compatible with different processes (e.g kernelmode only, or a Flag change)
 
-          //change regs
+					//change regs
+					if (ChangeRegBPList[i].changereginfo.Flags.changeRAX) {
+						if (isAMD) {
+							currentcpuinfo->vmcb->RAX=ChangeRegBPList[i].changereginfo.newRAX;
+						} else {
+							vmregisters->rax=ChangeRegBPList[i].changereginfo.newRAX;
+						}
+					}
+					if (ChangeRegBPList[i].changereginfo.Flags.changeRBX) vmregisters->rbx = ChangeRegBPList[i].changereginfo.newRBX;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeRCX) vmregisters->rcx = ChangeRegBPList[i].changereginfo.newRCX;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeRDX) vmregisters->rdx = ChangeRegBPList[i].changereginfo.newRDX;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeRSI) vmregisters->rsi = ChangeRegBPList[i].changereginfo.newRSI;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeRDI) vmregisters->rdi = ChangeRegBPList[i].changereginfo.newRDI;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeRBP) vmregisters->rbp = ChangeRegBPList[i].changereginfo.newRBP;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeRSP) {
+						if (isAMD) {
+							currentcpuinfo->vmcb->RSP=ChangeRegBPList[i].changereginfo.newRSP;
+						} else {
+							vmwrite(vm_guest_rsp, ChangeRegBPList[i].changereginfo.newRSP);
+						}
+					}
+					if (ChangeRegBPList[i].changereginfo.Flags.changeRIP) {
+						if (isAMD) {
+							currentcpuinfo->vmcb->RIP=ChangeRegBPList[i].changereginfo.newRIP;
+						} else {
+							vmwrite(vm_guest_rip, ChangeRegBPList[i].changereginfo.newRIP);
+						}
+					}
+					if (ChangeRegBPList[i].changereginfo.Flags.changeR8)  vmregisters->r8 = ChangeRegBPList[i].changereginfo.newR8;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeR9)  vmregisters->r9 = ChangeRegBPList[i].changereginfo.newR9;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeR10) vmregisters->r10 = ChangeRegBPList[i].changereginfo.newR10;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeR11) vmregisters->r11 = ChangeRegBPList[i].changereginfo.newR11;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeR12) vmregisters->r12 = ChangeRegBPList[i].changereginfo.newR12;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeR13) vmregisters->r13 = ChangeRegBPList[i].changereginfo.newR13;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeR14) vmregisters->r14 = ChangeRegBPList[i].changereginfo.newR14;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeR15) vmregisters->r15 = ChangeRegBPList[i].changereginfo.newR15;
 
-          if (ChangeRegBPList[i].changereginfo.Flags.changeRAX)
-          {
-            if (isAMD)
-              currentcpuinfo->vmcb->RAX=ChangeRegBPList[i].changereginfo.newRAX;
-            else
-              vmregisters->rax=ChangeRegBPList[i].changereginfo.newRAX;
-          }
-          if (ChangeRegBPList[i].changereginfo.Flags.changeRBX) vmregisters->rbx=ChangeRegBPList[i].changereginfo.newRBX;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeRCX) vmregisters->rcx=ChangeRegBPList[i].changereginfo.newRCX;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeRDX) vmregisters->rdx=ChangeRegBPList[i].changereginfo.newRDX;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeRSI) vmregisters->rsi=ChangeRegBPList[i].changereginfo.newRSI;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeRDI) vmregisters->rdi=ChangeRegBPList[i].changereginfo.newRDI;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeRBP) vmregisters->rbp=ChangeRegBPList[i].changereginfo.newRBP;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeRSP)
-          {
-            if (isAMD)
-              currentcpuinfo->vmcb->RSP=ChangeRegBPList[i].changereginfo.newRSP;
-            else
-              vmwrite(vm_guest_rsp, ChangeRegBPList[i].changereginfo.newRSP);
-          }
-          if (ChangeRegBPList[i].changereginfo.Flags.changeRIP)
-          {
-            if (isAMD)
-              currentcpuinfo->vmcb->RIP=ChangeRegBPList[i].changereginfo.newRIP;
-            else
-              vmwrite(vm_guest_rip, ChangeRegBPList[i].changereginfo.newRIP);
-          }
-          if (ChangeRegBPList[i].changereginfo.Flags.changeR8)  vmregisters->r8=ChangeRegBPList[i].changereginfo.newR8;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeR9)  vmregisters->r9=ChangeRegBPList[i].changereginfo.newR9;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeR10) vmregisters->r10=ChangeRegBPList[i].changereginfo.newR10;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeR11) vmregisters->r11=ChangeRegBPList[i].changereginfo.newR11;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeR12) vmregisters->r12=ChangeRegBPList[i].changereginfo.newR12;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeR13) vmregisters->r13=ChangeRegBPList[i].changereginfo.newR13;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeR14) vmregisters->r14=ChangeRegBPList[i].changereginfo.newR14;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeR15) vmregisters->r15=ChangeRegBPList[i].changereginfo.newR15;
+					if (ChangeRegBPList[i].changereginfo.changeFP) {
+						for (int r = 0; r < 8; r++) {
 
-          if (ChangeRegBPList[i].changereginfo.changeFP)
-          {
-            int r;
-            for (r=0; r<8; r++)
-              if (ChangeRegBPList[i].changereginfo.changeFP & (1<<r))
-              {
-                copymem((void*)((QWORD)(&fxsave->FP_MM0)+10*r), (void*)((QWORD)(&fxsave->FP_MM0)+10*r),10);
-              }
-
-          }
-
-
-          if (ChangeRegBPList[i].changereginfo.changeXMM)
-          {
-            int r;
-            for (r=0; r<15; r++)
-            {
-              BYTE mask=(ChangeRegBPList[i].changereginfo.changeXMM >> (4*r)) & 0xf;
-              if (mask)
-              {
-                DWORD *destparts=(DWORD *)((QWORD)(&fxsave->XMM0)+16*r);
-                DWORD *sourceparts=(DWORD *)((QWORD)(&ChangeRegBPList[i].changereginfo.newXMM0)+16*r);
-                int p;
-
-                for (p=0; p<4; p++)
-                {
-                  if (mask & (1 << p))
-                    destparts[p]=sourceparts[p];
-                }
-              }
-            }
-
-          }
+							if (ChangeRegBPList[i].changereginfo.changeFP & (1 << r)) {
+								copymem((void*)((QWORD)(&fxsave->FP_MM0) + 10 * r), (void*)((QWORD)(&fxsave->FP_MM0) + 10 * r), 10);
+							}
+						}
+					}
 
 
+					if (ChangeRegBPList[i].changereginfo.changeXMM) {
+						for (int r = 0; r < 15; r++) {
+							BYTE mask = (ChangeRegBPList[i].changereginfo.changeXMM >> (4 * r)) & 0xf;
 
-          RFLAGS flags;
-          flags.value=isAMD?currentcpuinfo->vmcb->RFLAGS:vmread(vm_guest_rflags);
-          if (ChangeRegBPList[i].changereginfo.Flags.changeCF) flags.CF=ChangeRegBPList[i].changereginfo.Flags.newCF;
-          if (ChangeRegBPList[i].changereginfo.Flags.changePF) flags.PF=ChangeRegBPList[i].changereginfo.Flags.newPF;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeAF) flags.AF=ChangeRegBPList[i].changereginfo.Flags.newAF;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeZF) flags.ZF=ChangeRegBPList[i].changereginfo.Flags.newZF;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeSF) flags.SF=ChangeRegBPList[i].changereginfo.Flags.newSF;
-          if (ChangeRegBPList[i].changereginfo.Flags.changeOF) flags.OF=ChangeRegBPList[i].changereginfo.Flags.newOF;
-          if (isAMD)
-            currentcpuinfo->vmcb->RFLAGS=flags.value;
-          else
-            vmwrite(vm_guest_rflags, flags.value);
+							if (mask) {
+								DWORD *destparts = (DWORD*)((QWORD)(&fxsave->XMM0) + 16 * r);
+								DWORD *sourceparts = (DWORD*)((QWORD)(&ChangeRegBPList[i].changereginfo.newXMM0) + 16 * r);
 
+								for (int p = 0; p < 4; p++) {
+									if (mask & (1 << p)) {
+										destparts[p]=sourceparts[p];
+									}
+								}
+							}
+						}
+					}
 
-          //continue:
-          if ((ChangeRegBPList[i].changereginfo.Flags.changeRIP==0) || (ChangeRegBPList[i].changereginfo.newRIP==oldRIP))
-          {
-            //RIP did not change
+					RFLAGS flags;
+					flags.value = isAMD
+						? currentcpuinfo->vmcb->RFLAGS
+						: vmread(vm_guest_rflags);
 
-            //restore the original byte
-            int offset=ChangeRegBPList[i].PhysicalAddress & 0xfff;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeCF) flags.CF = ChangeRegBPList[i].changereginfo.Flags.newCF;
+					if (ChangeRegBPList[i].changereginfo.Flags.changePF) flags.PF = ChangeRegBPList[i].changereginfo.Flags.newPF;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeAF) flags.AF = ChangeRegBPList[i].changereginfo.Flags.newAF;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeZF) flags.ZF = ChangeRegBPList[i].changereginfo.Flags.newZF;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeSF) flags.SF = ChangeRegBPList[i].changereginfo.Flags.newSF;
+					if (ChangeRegBPList[i].changereginfo.Flags.changeOF) flags.OF = ChangeRegBPList[i].changereginfo.Flags.newOF;
+					if (isAMD) {
+						currentcpuinfo->vmcb->RFLAGS=flags.value;
+					} else {
+						vmwrite(vm_guest_rflags, flags.value);
+					}
 
+					//continue:
+					if ((ChangeRegBPList[i].changereginfo.Flags.changeRIP == 0) || (ChangeRegBPList[i].changereginfo.newRIP == oldRIP)) {
+						//RIP did not change
+						//restore the original byte
+						int offset = ChangeRegBPList[i].PhysicalAddress & 0xfff;
 
-            unsigned char *executable=(unsigned char *)ChangeRegBPList[i].cloakdata->Executable;
-            executable[offset]=ChangeRegBPList[i].originalbyte;
+						unsigned char *executable = (unsigned char*)ChangeRegBPList[i].cloakdata->Executable;
+						executable[offset] = ChangeRegBPList[i].originalbyte;
 
-            //setup single step mode
-            vmx_enableSingleStepMode();
-            vmx_addSingleSteppingReason(currentcpuinfo, 3,i); //change reg on bp, restore int3 bp
+						//setup single step mode
+						vmx_enableSingleStepMode();
+						vmx_addSingleSteppingReason(currentcpuinfo, 3, i); //change reg on bp, restore int3 bp
 
-            //no interrupts for one instruction (no other interrupts are pending, it was an int3 that caused this)
-            if (isAMD)
-            {
-              //
-              currentcpuinfo->vmcb->INTERRUPT_SHADOW=1;
-            }
-            else
-            {
-              vmwrite(vm_guest_interruptability_state,2);
-            }
+						//no interrupts for one instruction (no other interrupts are pending, it was an int3 that caused this)
+						if (isAMD) {
+							currentcpuinfo->vmcb->INTERRUPT_SHADOW = 1;
+						} else {
+							vmwrite(vm_guest_interruptability_state, 2);
+						}
 
-            /* on systems with no exec only support, this means there will be 2 single step reasons.
-             * One for the breakpoint restore, and one to set the read disable back
-             */
+						/* on systems with no exec only support, this means there will be 2 single step reasons.
+						 * One for the breakpoint restore, and one to set the read disable back
+						 */
+					}
+					result = TRUE;
+					break;
+				} else {
+					//probably a stale breakpoint event that was waiting for the spinlock (what are the changes that there was a 0xcc at the exact same spot a previous bp was set)
+					//try again
+					//todo: keep a try again counter
+					result = TRUE;
+				}
+			}
+		}
 
-          }
-          result=TRUE;
-          break;
-        }
-        else
-        {
-          //probably a stale breakpoint event that was waiting for the spinlock (what are the changes that there was a 0xcc at the exact same spot a previous bp was set)
-          //try again
-          //todo: keep a try again counter
-          result=TRUE;
-        }
-      }
-    }
+		csLeave(&ChangeRegBPListCS);
+		csLeave(&CloakedPagesCS);
+	} else {
+		sendstringf("INF: Unreadable memory address for an int3 bp....\n");
+	}
 
-    csLeave(&ChangeRegBPListCS);
-    csLeave(&CloakedPagesCS);
-  }
-  else
-    sendstringf("Unreadable memory address for an int3 bp....\n");
-
-  return result;
+	return result;
 }
 
-int ept_handleStepAndBreak(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE64 *fxsave, int brokenthreadid)
-{
+int ept_handleStepAndBreak(pcpuinfo currentcpuinfo, VMRegisters *vmregisters, FXSAVE64 *fxsave, int brokenthreadid) {
+	//first check if you can break here. If not, goodbye (todo:step till you can)
+	//
+	nosendchar[getAPICID()] = 0;
+	sendstringf("INF: ept_handleStepAndBreak\n");
+	DWORD CR8 = getCR8();
+	RFLAGS flags;
 
-  //first check if you can break here. If not, goodbye (todo:step till you can)
-  nosendchar[getAPICID()]=0;
-  sendstringf("ept_handleStepAndBreak\n");
-  DWORD CR8=getCR8();
-  RFLAGS flags;
-  flags.value=isAMD?currentcpuinfo->vmcb->RFLAGS:vmread(vm_guest_rflags);
+	flags.value = isAMD 
+		? currentcpuinfo->vmcb->RFLAGS
+		: vmread(vm_guest_rflags);
 
+	if ((CR8 == 0) && (flags.IF)) { //if interruptable with no mask (on windows called passive mode) (not 100% if on win32, but who uses that...)
+		int kernelmode = 0;
+		if (isAMD) {
+			Segment_Attribs csattrib;
+			csattrib.SegmentAttrib = currentcpuinfo->vmcb->cs_attrib;
+			kernelmode=csattrib.DPL == 0;
+		} else {
+			Access_Rights csar;
+			csar.AccessRights = vmread(vm_guest_cs_access_rights);
+			kernelmode = csar.DPL == 0;
+		}
 
-  if ((CR8==0) && (flags.IF)) //if interruptable with no mask (on windows called passive mode) (not 100% if on win32, but who uses that...)
-  {
-    int kernelmode=0;
-    if (isAMD)
-    {
-      Segment_Attribs csattrib;
-      csattrib.SegmentAttrib=currentcpuinfo->vmcb->cs_attrib;
-      kernelmode=csattrib.DPL==0;
-    }
-    else
-    {
-      Access_Rights csar;
-      csar.AccessRights=vmread(vm_guest_cs_access_rights);
-      kernelmode=csar.DPL==0;
-    }
+		csEnter(&BrokenThreadListCS);
+		if (isAMD) { //normally this gets reset after the single step handler. But it needs to be reset here already
+			flags.TF = currentcpuinfo->singleStepping.PreviousTFState;
+			currentcpuinfo->vmcb->RFLAGS = flags.value;
+		}
 
-    csEnter(&BrokenThreadListCS);
+		QWORD newRIP = 0;
+		if ((brokenthreadid < 0) || (brokenthreadid >= BrokenThreadListPos)) {
+			while (1);
+		}
 
-    if (isAMD) //normally this gets reset after the single step handler. But it needs to be reset here already
-    {
-      flags.TF=currentcpuinfo->singleStepping.PreviousTFState;
-      currentcpuinfo->vmcb->RFLAGS=flags.value;
-    }
+		if (BrokenThreadList[brokenthreadid].continueMethod == 1) { //single step
+			newRIP = kernelmode
+				? BrokenThreadList[brokenthreadid].KernelModeLoop
+				: BrokenThreadList[brokenthreadid].UserModeLoop; //anything else, will be a run
+		}
 
+		if (newRIP) { //e.g if no kernelmode is provided, skip kernelmode
+					  //save the current state
+			fillPageEventBasic(&BrokenThreadList[brokenthreadid].state.basic, vmregisters);
+			BrokenThreadList[brokenthreadid].state.fpudata = *fxsave;
 
-    QWORD newRIP=0;
+			//adjust RIP and RAX  (rip points to the parking spot, RAX contains the specific brokenthreadid (gets undone on resume anyhow)
+			vmregisters->rax = brokenthreadid;
+			if (isAMD) {
+				currentcpuinfo->vmcb->RIP = newRIP;
+				currentcpuinfo->vmcb->RAX = brokenthreadid;
+			} else {
+				vmwrite(vm_guest_rip, newRIP);
+			}
+			BrokenThreadList[brokenthreadid].continueMethod = 0;
+		} else {
+			//delete
+			BrokenThreadList[brokenthreadid].inuse = 2; //mark it as lost
+			BrokenThreadList[brokenthreadid].continueMethod = 0;
+		}
 
-    if ((brokenthreadid<0) || (brokenthreadid>=BrokenThreadListPos))
-      while (1);
+		csLeave(&BrokenThreadListCS);
+	} else {
+		csEnter(&BrokenThreadListCS);
+		sendstringf("INF: Can not be broken due to interrupt state. Deleting stepping mode\n");
+		BrokenThreadList[brokenthreadid].inuse = 2; //lost
+		BrokenThreadList[brokenthreadid].continueMethod = 0;
+		csLeave(&BrokenThreadListCS);
+		//else can't be broken here. bye bye
+	}
 
-
-    if (BrokenThreadList[brokenthreadid].continueMethod==1) //single step
-      newRIP=kernelmode?BrokenThreadList[brokenthreadid].KernelModeLoop:BrokenThreadList[brokenthreadid].UserModeLoop; //anything else, will be a run
-
-    if (newRIP) //e.g if no kernelmode is provided, skip kernelmode
-    {
-      //save the current state
-      fillPageEventBasic(&BrokenThreadList[brokenthreadid].state.basic, vmregisters);
-      BrokenThreadList[brokenthreadid].state.fpudata=*fxsave;
-
-      //adjust RIP and RAX  (rip points to the parking spot, RAX contains the specific brokenthreadid (gets undone on resume anyhow)
-      vmregisters->rax=brokenthreadid;
-      if (isAMD)
-      {
-        currentcpuinfo->vmcb->RIP=newRIP;
-        currentcpuinfo->vmcb->RAX=brokenthreadid;
-      }
-      else
-        vmwrite(vm_guest_rip, newRIP);
-
-      BrokenThreadList[brokenthreadid].continueMethod=0;
-    }
-    else
-    {
-      //delete
-      BrokenThreadList[brokenthreadid].inuse=2; //mark it as lost
-      BrokenThreadList[brokenthreadid].continueMethod=0;
-    }
-
-    csLeave(&BrokenThreadListCS);
-  }
-  else
-  {
-    csEnter(&BrokenThreadListCS);
-    sendstringf("Can not be broken due to interrupt state. Deleting stepping mode\n");
-    BrokenThreadList[brokenthreadid].inuse=2; //lost
-    BrokenThreadList[brokenthreadid].continueMethod=0;
-    csLeave(&BrokenThreadListCS);
-
-
-    //else can't be broken here. bye bye
-  }
-
-  return 0;
+	return 0;
 }
 
-int ept_getBrokenThreadListCount(void)
-{
-  return BrokenThreadListPos;
+int ept_getBrokenThreadListCount(void) {
+	return BrokenThreadListPos;
 }
 
 
 
-int ept_getBrokenThreadEntryShort(int id, int *WatchID, int *Status, QWORD *CR3, QWORD *FSBASE, QWORD *GSBASE, QWORD *GSBASE_KERNEL, DWORD *CS, QWORD *RIP, QWORD *heartbeat)
-{
-  int result=0;
-  csEnter(&BrokenThreadListCS);
-  if ((id>=0) && (id<BrokenThreadListPos))
-  {
-    if (BrokenThreadList[id].inuse)
-    {
-      *WatchID=BrokenThreadList[id].watchid;
-      *Status=BrokenThreadList[id].inuse | (BrokenThreadList[id].continueMethod << 8);
+int ept_getBrokenThreadEntryShort(int id, int *WatchID, int *Status, QWORD *CR3, QWORD *FSBASE, QWORD *GSBASE, QWORD *GSBASE_KERNEL, DWORD *CS, QWORD *RIP, QWORD *heartbeat) {
+	int result = 0;
 
-      *CR3=BrokenThreadList[id].state.basic.CR3;
-      *FSBASE=BrokenThreadList[id].state.basic.FSBASE;
-      *GSBASE=BrokenThreadList[id].state.basic.GSBASE;
-      *GSBASE_KERNEL=BrokenThreadList[id].state.basic.GSBASE_KERNEL;
-      *CS=BrokenThreadList[id].state.basic.CS;
-      *RIP=BrokenThreadList[id].state.basic.RIP;
-      *heartbeat=BrokenThreadList[id].state.basic.Count;
-    }
-    else
-      result=2;
-  }
-  else
-    result=1;
+	csEnter(&BrokenThreadListCS);
+	if ((id >= 0) && (id < BrokenThreadListPos)) {
+		if (BrokenThreadList[id].inuse) {
+			*WatchID = BrokenThreadList[id].watchid;
+			*Status = BrokenThreadList[id].inuse | (BrokenThreadList[id].continueMethod << 8);
 
-  csLeave(&BrokenThreadListCS);
-  return result;
+			*CR3 = BrokenThreadList[id].state.basic.CR3;
+			*FSBASE = BrokenThreadList[id].state.basic.FSBASE;
+			*GSBASE = BrokenThreadList[id].state.basic.GSBASE;
+			*GSBASE_KERNEL = BrokenThreadList[id].state.basic.GSBASE_KERNEL;
+			*CS = BrokenThreadList[id].state.basic.CS;
+			*RIP = BrokenThreadList[id].state.basic.RIP;
+			*heartbeat = BrokenThreadList[id].state.basic.Count;
+		} else {
+			result = 2;
+		}
+	} else {
+		result = 1;
+	}
+
+	csLeave(&BrokenThreadListCS);
+	return result;
 }
 
-int ept_getBrokenThreadEntryFull(int id, int *watchid, int *status, PPageEventExtended entry)
-{
-  int result=0;
-  csEnter(&BrokenThreadListCS);
-  if ((id>=0) && (id<BrokenThreadListPos))
-  {
-    if (BrokenThreadList[id].inuse)
-    {
-      //0..7:1=ok. 2=lost it
-      //8..15: continuemethod (if not 0, still waiting to precess)
-      *status=BrokenThreadList[id].inuse | (BrokenThreadList[id].continueMethod << 8);  //257=0x101 (inuse,continuemethod=step)   513=0x201  (inuse,run)
+int ept_getBrokenThreadEntryFull(int id, int *watchid, int *status, PPageEventExtended entry) {
+	int result = 0;
 
-      *entry=BrokenThreadList[id].state;
-      *watchid=BrokenThreadList[id].watchid;
-    }
-    else
-      result=2;
-  }
-  else
-    result=1;
+	csEnter(&BrokenThreadListCS);
+	if ((id >= 0) && (id < BrokenThreadListPos)) {
+		if (BrokenThreadList[id].inuse) {
+			//0..7:1=ok. 2=lost it
+			//8..15: continuemethod (if not 0, still waiting to precess)
+			*status = BrokenThreadList[id].inuse | (BrokenThreadList[id].continueMethod << 8);  //257=0x101 (inuse,continuemethod=step)   513=0x201  (inuse,run)
+			*entry = BrokenThreadList[id].state;
+			*watchid = BrokenThreadList[id].watchid;
+		} else {
+			result = 2;
+		}
+	} else {
+		result = 1;
+	}
 
-  csLeave(&BrokenThreadListCS);
-  return result;
+	csLeave(&BrokenThreadListCS);
+	return result;
 }
 
-int ept_setBrokenThreadEntryFull(int id, PPageEventExtended entry)
-{
-  int result=0;
-  csEnter(&BrokenThreadListCS);
-  if ((id>=0) && (id<BrokenThreadListPos))
-  {
-    if (BrokenThreadList[id].inuse)
-      BrokenThreadList[id].state=*entry;
-    else
-      result=2;
-  }
-  else
-    result=1;
+int ept_setBrokenThreadEntryFull(int id, PPageEventExtended entry) {
+	int result = 0;
 
-  csLeave(&BrokenThreadListCS);
-  return result;
+	csEnter(&BrokenThreadListCS);
+	if ((id >= 0) && (id < BrokenThreadListPos)) {
+		if (BrokenThreadList[id].inuse) {
+			BrokenThreadList[id].state = *entry;
+		} else {
+			result = 2;
+		}
+	} else {
+		result = 1;
+	}
 
+	csLeave(&BrokenThreadListCS);
+	return result;
 }
 
-int ept_resumeBrokenThread(int id, int continueMethod)
-{
-  int result=0;
-  sendstringf("ept_resumeBrokenThread(%d,%d)\n",id, continueMethod);
-  csEnter(&BrokenThreadListCS);
-  if ((id>=0) && (id<BrokenThreadListPos))
-  {
-    if (BrokenThreadList[id].inuse)
-    {
-      if (BrokenThreadList[id].inuse==2)
-      {
-        sendstringf("This thread was abandoned. Releasing it's spot\n");
+int ept_resumeBrokenThread(int id, int continueMethod) {
+	int result = 0;
+	sendstringf("INF: ept_resumeBrokenThread(%d,%d)\n",id, continueMethod);
 
-        //just release it
-        BrokenThreadList[id].inuse=0;
-        result=4;
-      }
-      else
-      {
-        if (BrokenThreadList[id].continueMethod==0)
-        {
-          sendstringf("Setting broken thread %d to continueMethod %d\n", id, continueMethod);
-          BrokenThreadList[id].continueMethod=continueMethod;
-          BrokenThreadList[id].watchid=-1;
-        }
-        else
-        {
-          sendstringf("already set to continue\n");
-          result=3; //already set to continue
-        }
-      }
-    }
-    else
-    {
-      sendstringf("ID (%d) not in use\n", id);
-      result=2; //not in use
-    }
-  }
-  else
-  {
-    sendstringf("ID (%d) out of range\n", id);
-    result=1; //out of range
-  }
+	csEnter(&BrokenThreadListCS);
+	if ((id >= 0) && (id < BrokenThreadListPos)) {
+		if (BrokenThreadList[id].inuse) {
+			if (BrokenThreadList[id].inuse == 2) {
+				sendstringf("INF: This thread was abandoned. Releasing it's spot\n");
 
-  csLeave(&BrokenThreadListCS);
+				//just release it
+				BrokenThreadList[id].inuse = 0;
+				result = 4;
+			} else {
+				if (BrokenThreadList[id].continueMethod == 0) {
+					sendstringf("INF: Setting broken thread %d to continueMethod %d\n", id, continueMethod);
+					BrokenThreadList[id].continueMethod = continueMethod;
+					BrokenThreadList[id].watchid = -1;
+				} else {
+					sendstringf("INF: already set to continue\n");
+					result = 3; //already set to continue
+				}
+			}
+		} else {
+			sendstringf("INF: ID (%d) not in use\n", id);
+			result = 2; //not in use
+		}
+	} else {
+		sendstringf("INF: ID (%d) out of range\n", id);
+		result = 1; //out of range
+	}
 
-  return result;
+	csLeave(&BrokenThreadListCS);
+	return result;
 }
 
+int ept_handleSoftwareBreakpointAfterStep(pcpuinfo currentcpuinfo UNUSED,  int ID) {
+	int result = 0;
 
+	csEnter(&CloakedPagesCS);
+	csEnter(&ChangeRegBPListCS);
 
-int ept_handleSoftwareBreakpointAfterStep(pcpuinfo currentcpuinfo UNUSED,  int ID)
-{
-  int result=0;
-  csEnter(&CloakedPagesCS);
-  csEnter(&ChangeRegBPListCS);
-  if (ChangeRegBPList[ID].Active)//Just hope that you didn't quickly delete and then register a whole new breakpoint, as this will fuck you up
-  {
+	if (ChangeRegBPList[ID].Active) { //Just hope that you didn't quickly delete and then register a whole new breakpoint, as this will fuck you up
+		QWORD PA = ChangeRegBPList[ID].PhysicalAddress;
+		QWORD PABase = PA & MAXPHYADDRMASKPB;
+		int offset = PA - PABase;
 
-    QWORD PA=ChangeRegBPList[ID].PhysicalAddress;
-    QWORD PABase=PA & MAXPHYADDRMASKPB;
-    int offset=PA-PABase;
+		unsigned char *executable = (unsigned char*)ChangeRegBPList[ID].cloakdata->Executable;
+		executable[offset] = 0xcc; //set the breakpoint back
+		result = 0;
+	}
+	//else it got deleted before the step finished or total memory corruption that blanked out several memory regions
+	csLeave(&ChangeRegBPListCS);
+	csLeave(&CloakedPagesCS);
 
-    unsigned char *executable=(unsigned char*)ChangeRegBPList[ID].cloakdata->Executable;
-    executable[offset]=0xcc; //set the breakpoint back
-    result=0;
-  }
-  //else it got deleted before the step finished or total memory corruption that blanked out several memory regions
-
-  csLeave(&ChangeRegBPListCS);
-  csLeave(&CloakedPagesCS);
-
-  return result;
+	return result;
 }
 
+int getFreeWatchID() {
+	/*
+	 * scan through the watches for an unused spot, if not found, reallocate the list
+	 * pre: The watchlistCS has been locked
+	 */
+	int i = 0, j = 0;
+	sendstringf("INF: +getFreeWatchID\n");
+	for (; i < eptWatchListPos; i++) {
+		if (eptWatchList[i].Active == 0) {
+			sendstringf("INF: Found a non active entry at index %d\n", i);
+			return i;
+		}
+	}
 
+	//still here
+	if (eptWatchListPos < eptWatchListSize) {
+		sendstringf("INF: eptWatchListPos(%d)<eptWatchListSize(%d)\n", eptWatchListPos, eptWatchListSize);
+		return eptWatchListPos++;
+	}
 
-/*
- * WATCH
- */
+	sendstringf("INF: Reallocating the list\n");
 
+	//still here, realloc
+	i = eptWatchListSize;
+	eptWatchListSize = (eptWatchListSize + 2) * 2;
+	eptWatchList = realloc(eptWatchList, eptWatchListSize * sizeof(EPTWatchEntry));
 
-int getFreeWatchID()
-/*
- * scan through the watches for an unused spot, if not found, reallocate the list
- * pre: The watchlistCS has been locked
- */
-{
-  int i,j;
-  sendstringf("+getFreeWatchID\n");
-  for (i=0; i<eptWatchListPos; i++)
-  {
-    if (eptWatchList[i].Active==0)
-    {
-      sendstringf("Found a non active entry at index %d\n", i);
-      return i;
-    }
-  }
+	for (j = i; j<eptWatchListSize; j++) {
+		eptWatchList[j].Active=0;
+	}
 
-  //still here
-  if (eptWatchListPos<eptWatchListSize)
-  {
-    sendstringf("eptWatchListPos(%d)<eptWatchListSize(%d)\n", eptWatchListPos, eptWatchListSize);
-    return eptWatchListPos++;
-  }
-
-  sendstringf("Reallocating the list\n");
-
-  //still here, realloc
-  i=eptWatchListSize;
-  eptWatchListSize=(eptWatchListSize+2)*2;
-  eptWatchList=realloc(eptWatchList, eptWatchListSize*sizeof(EPTWatchEntry));
-
-  for (j=i; j<eptWatchListSize; j++)
-    eptWatchList[j].Active=0;
-
-  eptWatchListPos++;
-
-  return i;
+	eptWatchListPos++;
+	return i;
 }
 
-void saveStack(pcpuinfo currentcpuinfo, unsigned char *stack) //stack is 4096 bytes
-{
-  int error;
-  QWORD pagefaultaddress;
-  int size=4096;
-  QWORD rsp=isAMD?currentcpuinfo->vmcb->RSP:vmread(vm_guest_rsp);
+void saveStack(pcpuinfo currentcpuinfo, unsigned char *stack) { //stack is 4096 bytes
+	int error = 0;
+	QWORD pagefaultaddress = 0;
+	int size = 4096;
 
+	QWORD rsp = isAMD
+		? currentcpuinfo->vmcb->RSP
+		: vmread(vm_guest_rsp);
 
+	zeromemory(stack, 4096);
+	//copy it but don't care about pagefaults (if there is a pagefault I 'could' trigger a pf and then wait and try again, but fuck it, it's not 'that' important
+	unsigned char *gueststack = (unsigned char*)mapVMmemoryEx(currentcpuinfo, rsp, 4096, &error, &pagefaultaddress, 1);
+	if (error) {
+		if (error == 2) {
+			size=pagefaultaddress-rsp;
+		} else {
+			return;
+		}
+	}
 
-  zeromemory(stack, 4096);
-  //copy it but don't care about pagefaults (if there is a pagefault I 'could' trigger a pf and then wait and try again, but fuck it, it's not 'that' important
-  unsigned char *gueststack=(unsigned char *)mapVMmemoryEx(currentcpuinfo, rsp, 4096, &error, &pagefaultaddress, 1);
-
-  if (error)
-  {
-    if (error==2)
-      size=pagefaultaddress-rsp;
-    else
-      return;
-  }
-
-  copymem(stack, gueststack, size);
-  unmapVMmemory(gueststack, size);
+	copymem(stack, gueststack, size);
+	unmapVMmemory(gueststack, size);
 }
 
-void fillPageEventBasic(PageEventBasic *peb, VMRegisters *registers)
-{
+void fillPageEventBasic(PageEventBasic *peb, VMRegisters *registers) {
+	peb->GSBASE_KERNEL = readMSR(IA32_GS_BASE_KERNEL_MSR);
 
-  peb->GSBASE_KERNEL=readMSR(IA32_GS_BASE_KERNEL_MSR);
-  if (isAMD)
-  {
-    pcpuinfo c=getcpuinfo();
+	if (isAMD) {
+		pcpuinfo c = getcpuinfo();
 
-    peb->VirtualAddress=0;
-    peb->PhysicalAddress=c->vmcb->EXITINFO2;
-    peb->CR3=c->vmcb->CR3;
-    peb->FSBASE=c->vmcb->fs_base;
-    peb->GSBASE=c->vmcb->gs_base;
+		peb->VirtualAddress = 0;
+		peb->PhysicalAddress = c->vmcb->EXITINFO2;
+		peb->CR3 = c->vmcb->CR3;
+		peb->FSBASE = c->vmcb->fs_base;
+		peb->GSBASE = c->vmcb->gs_base;
 
-    peb->FLAGS=c->vmcb->RFLAGS;
-    peb->RAX=c->vmcb->RAX;
-    peb->RBX=registers->rbx;
-    peb->RCX=registers->rcx;
-    peb->RDX=registers->rdx;
-    peb->RSI=registers->rsi;
-    peb->RDI=registers->rdi;
-    peb->R8=registers->r8;
-    peb->R9=registers->r9;
-    peb->R10=registers->r10;
-    peb->R11=registers->r11;
-    peb->R12=registers->r12;
-    peb->R13=registers->r13;
-    peb->R14=registers->r14;
-    peb->R15=registers->r15;
-    peb->RBP=registers->rbp;
-    peb->RSP=c->vmcb->RSP;
-    peb->RIP=c->vmcb->RIP;
-    peb->DR0=getDR0();
-    peb->DR1=getDR1();
-    peb->DR2=getDR2();
-    peb->DR3=getDR3();
-    peb->DR6=c->vmcb->DR6;
-    peb->DR7=c->vmcb->DR7;
-    peb->CS=c->vmcb->cs_selector;
-    peb->DS=c->vmcb->ds_selector;
-    peb->ES=c->vmcb->es_selector;
-    peb->SS=c->vmcb->ss_selector;
-    peb->FS=c->vmcb->fs_selector;
-    peb->GS=c->vmcb->gs_selector;
+		peb->FLAGS = c->vmcb->RFLAGS;
+		peb->RAX = c->vmcb->RAX;
+		peb->RBX = registers->rbx;
+		peb->RCX = registers->rcx;
+		peb->RDX = registers->rdx;
+		peb->RSI = registers->rsi;
+		peb->RDI = registers->rdi;
+		peb->R8 = registers->r8;
+		peb->R9 = registers->r9;
+		peb->R10 = registers->r10;
+		peb->R11 = registers->r11;
+		peb->R12 = registers->r12;
+		peb->R13 = registers->r13;
+		peb->R14 = registers->r14;
+		peb->R15 = registers->r15;
+		peb->RBP = registers->rbp;
+		peb->RSP = c->vmcb->RSP;
+		peb->RIP = c->vmcb->RIP;
+		peb->DR0 = getDR0();
+		peb->DR1 = getDR1();
+		peb->DR2 = getDR2();
+		peb->DR3 = getDR3();
+		peb->DR6 = c->vmcb->DR6;
+		peb->DR7 = c->vmcb->DR7;
+		peb->CS = c->vmcb->cs_selector;
+		peb->DS = c->vmcb->ds_selector;
+		peb->ES = c->vmcb->es_selector;
+		peb->SS = c->vmcb->ss_selector;
+		peb->FS = c->vmcb->fs_selector;
+		peb->GS = c->vmcb->gs_selector;
+	} else {
+		peb->VirtualAddress = vmread(vm_guest_linear_address);
+		peb->PhysicalAddress = vmread(vm_guest_physical_address);
+		peb->CR3 = vmread(vm_guest_cr3);
+		peb->FSBASE = vmread(vm_guest_fs_base);
+		peb->GSBASE = vmread(vm_guest_gs_base);
+		peb->FLAGS = vmread(vm_guest_rflags);
+		peb->RAX = registers->rax;
+		peb->RBX = registers->rbx;
+		peb->RCX = registers->rcx;
+		peb->RDX = registers->rdx;
+		peb->RSI = registers->rsi;
+		peb->RDI = registers->rdi;
+		peb->R8 = registers->r8;
+		peb->R9 = registers->r9;
+		peb->R10 = registers->r10;
+		peb->R11 = registers->r11;
+		peb->R12 = registers->r12;
+		peb->R13 = registers->r13;
+		peb->R14 = registers->r14;
+		peb->R15 = registers->r15;
+		peb->RBP = registers->rbp;
+		peb->RSP = vmread(vm_guest_rsp);
+		peb->RIP = vmread(vm_guest_rip);
 
-  }
-  else
-  {
+		peb->DR0 = getDR0();
+		peb->DR1 = getDR1();
+		peb->DR2 = getDR2();
+		peb->DR3 = getDR3();
 
-    peb->VirtualAddress=vmread(vm_guest_linear_address);
-    peb->PhysicalAddress=vmread(vm_guest_physical_address);
-    peb->CR3=vmread(vm_guest_cr3);
-    peb->FSBASE=vmread(vm_guest_fs_base);
-    peb->GSBASE=vmread(vm_guest_gs_base);
-    peb->FLAGS=vmread(vm_guest_rflags);
-    peb->RAX=registers->rax;
-    peb->RBX=registers->rbx;
-    peb->RCX=registers->rcx;
-    peb->RDX=registers->rdx;
-    peb->RSI=registers->rsi;
-    peb->RDI=registers->rdi;
-    peb->R8=registers->r8;
-    peb->R9=registers->r9;
-    peb->R10=registers->r10;
-    peb->R11=registers->r11;
-    peb->R12=registers->r12;
-    peb->R13=registers->r13;
-    peb->R14=registers->r14;
-    peb->R15=registers->r15;
-    peb->RBP=registers->rbp;
-    peb->RSP=vmread(vm_guest_rsp);
-    peb->RIP=vmread(vm_guest_rip);
-
-    peb->DR0=getDR0();
-    peb->DR1=getDR1();
-    peb->DR2=getDR2();
-    peb->DR3=getDR3();
-
-    peb->DR6=getDR6();
-    peb->DR7=vmread(vm_guest_dr7);
-    peb->CS=vmread(vm_guest_cs);
-    peb->DS=vmread(vm_guest_ds);
-    peb->ES=vmread(vm_guest_es);
-    peb->SS=vmread(vm_guest_ss);
-    peb->FS=vmread(vm_guest_fs);
-    peb->GS=vmread(vm_guest_gs);
-  }
-  peb->Count=0;
+		peb->DR6 = getDR6();
+		peb->DR7 = vmread(vm_guest_dr7);
+		peb->CS = vmread(vm_guest_cs);
+		peb->DS = vmread(vm_guest_ds);
+		peb->ES = vmread(vm_guest_es);
+		peb->SS = vmread(vm_guest_ss);
+		peb->FS = vmread(vm_guest_fs);
+		peb->GS = vmread(vm_guest_gs);
+	}
+	peb->Count = 0;
 }
 
-void recordState(void *liststart, int datatype, int currentEntryNr, pcpuinfo currentcpuinfo, VMRegisters *vmregisters, PFXSAVE64 fxsave)
-{
+void recordState(void *liststart, int datatype, int currentEntryNr, pcpuinfo currentcpuinfo, VMRegisters *vmregisters, PFXSAVE64 fxsave) {
+	sendstringf("INF: recordState(%p, %d, %d, %p, %p, %p)",liststart, datatype, currentEntryNr, currentcpuinfo, vmregisters, fxsave);
 
-  sendstringf("recordState(%p, %d, %d, %p, %p, %p)",liststart, datatype, currentEntryNr, currentcpuinfo, vmregisters, fxsave);
-  int logentrysize=0;
-  switch (datatype)
-  {
-    case PE_BASIC:
-      logentrysize=sizeof(PageEventBasic);
-      PageEventBasic *peb=(PageEventBasic *)((QWORD)(liststart)+currentEntryNr*logentrysize);
-      fillPageEventBasic(peb, vmregisters); //physical and linear are ignored if a tracer log
-      break;
+	int logentrysize = 0;
+	switch (datatype) {
+		case PE_BASIC:
+			{
+				logentrysize = sizeof(PageEventBasic);
+				PageEventBasic *peb = (PageEventBasic *)((QWORD)(liststart) + currentEntryNr * logentrysize);
+				fillPageEventBasic(peb, vmregisters); //physical and linear are ignored if a tracer log
+				break;
+			}
 
-    case PE_EXTENDED:
-      logentrysize=sizeof(PageEventExtended);
-      PageEventExtended *pee=(PageEventExtended *)((QWORD)(liststart)+currentEntryNr*logentrysize);
-      fillPageEventBasic((PageEventBasic*)pee, vmregisters);
-      pee->fpudata=*fxsave;
-      break;
+		case PE_EXTENDED:
+			{
+				logentrysize = sizeof(PageEventExtended);
+				PageEventExtended *pee = (PageEventExtended *)((QWORD)(liststart) + currentEntryNr * logentrysize);
+				fillPageEventBasic((PageEventBasic*)pee, vmregisters);
+				pee->fpudata = *fxsave;
+				break;
+			}
 
-    case PE_BASICSTACK:
-      logentrysize=sizeof(PageEventBasicWithStack);
-      PageEventBasicWithStack *pebws=(PageEventBasicWithStack *)((QWORD)(liststart)+currentEntryNr*logentrysize);
-      fillPageEventBasic((PageEventBasic*)pebws, vmregisters);
-      saveStack(currentcpuinfo, pebws->stack);
-      break;
+		case PE_BASICSTACK:
+			{
+				logentrysize = sizeof(PageEventBasicWithStack);
+				PageEventBasicWithStack *pebws = (PageEventBasicWithStack *)((QWORD)(liststart) + currentEntryNr * logentrysize);
+				fillPageEventBasic((PageEventBasic*)pebws, vmregisters);
+				saveStack(currentcpuinfo, pebws->stack);
+				break;
+			}
 
-    case PE_EXTENDEDSTACK:
-      logentrysize=sizeof(PageEventExtendedWithStack);
-      PageEventExtendedWithStack *peews=(PageEventExtendedWithStack *)((QWORD)(liststart)+currentEntryNr*logentrysize);
-      fillPageEventBasic((PageEventBasic*)peews, vmregisters);
-      saveStack(currentcpuinfo, peews->stack);
-      peews->fpudata=*fxsave;
-      break;
-  }
-  if (datatype<0)
-    return;
+		case PE_EXTENDEDSTACK:
+			{
+				logentrysize = sizeof(PageEventExtendedWithStack);
+				PageEventExtendedWithStack *peews = (PageEventExtendedWithStack *)((QWORD)(liststart) + currentEntryNr * logentrysize);
+				fillPageEventBasic((PageEventBasic*)peews, vmregisters);
+				saveStack(currentcpuinfo, peews->stack);
+				peews->fpudata = *fxsave;
+				break;
+			}
+	}
+	if (datatype < 0) {
+		return;
+	}
 }
 
-
-
-int ept_isWatchIDPerfectMatch(QWORD address, int ID)
-{
-  return ((eptWatchList[ID].Active) &&
-          (
-             (address>=eptWatchList[ID].PhysicalAddress) &&
-             (address<eptWatchList[ID].PhysicalAddress+eptWatchList[ID].Size)
-           )
-          );
+int ept_isWatchIDPerfectMatch(QWORD address, int ID) {
+	return ((eptWatchList[ID].Active) && (
+				(address >= eptWatchList[ID].PhysicalAddress) &&
+				(address < eptWatchList[ID].PhysicalAddress + eptWatchList[ID].Size)
+				));
 }
 
-int ept_isWatchIDMatch(QWORD address, int ID)
-/*
- * pre: address is already page aligned
- */
-{
-  return ((eptWatchList[ID].Active) && ((eptWatchList[ID].PhysicalAddress & 0xfffffffffffff000ULL) == address));
+int ept_isWatchIDMatch(QWORD address, int ID) {
+	/*
+	 * pre: address is already page aligned
+	 */
+	return ((eptWatchList[ID].Active) && ((eptWatchList[ID].PhysicalAddress & 0xfffffffffffff000ULL) == address));
 }
 
-int ept_getWatchID(QWORD address)
-/*
- * returns -1 if not in a page being watched
- * Note that there can be multiple active on the same page
- */
-{
-  int i;
-  //sendstringf("ept_getWatchID(%6)\n", address);
-  address=address & 0xfffffffffffff000ULL;
-  for (i=0; i<eptWatchListPos; i++)
-    if (ept_isWatchIDMatch(address, i))
-      return i;
-
-  return -1;
+int ept_getWatchID(QWORD address) {
+	/*
+	 * returns -1 if not in a page being watched
+	 * Note that there can be multiple active on the same page
+	 */
+	//sendstringf("ept_getWatchID(%6)\n", address);
+	address = address & 0xfffffffffffff000ULL;
+	for (int i = 0; i < eptWatchListPos; i++) {
+		if (ept_isWatchIDMatch(address, i)) {
+			return i;
+		}
+	}
+	return -1;
 }
 
 
 
 
-BOOL ept_handleWatchEvent(pcpuinfo currentcpuinfo, VMRegisters *registers, PFXSAVE64 fxsave, QWORD PhysicalAddress)
-//Used by Intel and AMD
-{
-  EPT_VIOLATION_INFO evi;
-  NP_VIOLATION_INFO nvi;
-
-  int ID;
-  int logentrysize;
-  int i;
-
-  if (eptWatchListPos==0)
-    return FALSE;
-
-  if (isAMD)
-  {
-
-
-    nvi.ErrorCode=currentcpuinfo->vmcb->EXITINFO1;
-    if (nvi.ID)
-    {
-      //instruction fetch.  Apparently, PA is not exact and on a 16 byte radius or worse
-      sendstringf("ept_handleWatchEvent execute (ID) on AMD.  RIP=%6 PA=%6\n", currentcpuinfo->vmcb->RIP, PhysicalAddress);
-
-      PhysicalAddress=(PhysicalAddress & 0xfffffffffffff000ULL) | (currentcpuinfo->vmcb->RIP & 0xfff);
-
-      sendstringf("changed PhysicalAddress to %6\n", PhysicalAddress);
-
-
-
-    }
-  }
-  else
-  {
-    evi.ExitQualification=vmread(vm_exit_qualification);
-
-  }
-
-  csEnter(&eptWatchListCS);
-
-  ID=ept_getWatchID(PhysicalAddress);
-
-
-  if (ID==-1)
-  {
-    csLeave(&eptWatchListCS);
-    return FALSE;
-  }
-
-  if (isAMD)
-    lastSeenEPTWatch.data=nvi.ErrorCode;
-
-  else
-    lastSeenEPTWatch.data=evi.ExitQualification;
-
-  lastSeenEPTWatch.physicalAddress=PhysicalAddress;
-  lastSeenEPTWatch.initialID=ID;
-
-
-  QWORD RIP;
-  QWORD RSP;
-
-  sendstring("EPT/NP event and there is a watchlist entry\n");
-  sendstringf("ept_getWatchID returned %d\n", ID);
-
-
-  if (isAMD)
-  {
-    RIP=currentcpuinfo->vmcb->RIP;
-    RSP=currentcpuinfo->vmcb->RSP;
-  }
-  else
-  {
-    RIP=vmread(vm_guest_rip);
-    RSP=vmread(vm_guest_rsp);
-  }
-
-  lastSeenEPTWatch.skipped=-1;
-  lastSeenEPTWatch.rip=RIP;
-
-  QWORD PhysicalAddressBase=PhysicalAddress & 0xfffffffffffff000ULL;
-
-
-
-  //nosendchar[getAPICID()]=0;
-  sendstringf("Handling something that resembles watch ID %d\n", ID);
-
-
-  //figure out which access it is really (in case of multiple on the same page)
-
-  for (i=ID; i<eptWatchListPos; i++)
-  {
-    if (ept_isWatchIDMatch(PhysicalAddressBase, i))
-    {
-      if (eptWatchList[ID].Type==EPTW_WRITE)
-      {
-        //must be a write operation error
-        if (((!isAMD) && (evi.W) && (evi.WasWritable==0)) || (isAMD && nvi.W))  //write operation and writable was 0
-        {
-          ID=i;
-
-          if (ept_isWatchIDPerfectMatch(PhysicalAddress, i))
-            break;
-        }
-      }
-      else if (eptWatchList[ID].Type==EPTW_READWRITE)
-      {
-        //must be a read or write operation
-        if ((isAMD && nvi.P==0) || ((!isAMD) && (((evi.W) && (evi.WasWritable==0)) || ((evi.R) && (evi.WasReadable==0)))) ) //write operation and writable was 0 or read and readable was 0
-        {
-          ID=i;
-          if (ept_isWatchIDPerfectMatch(PhysicalAddress, i))
-            break;
-        }
-      }
-      else
-      {
-          if ((isAMD && nvi.ID) || ((!isAMD) && (evi.X) && (evi.WasExecutable==0))) //execute operation and executable was 0
-          {
-            ID=i;
-
-            if (ept_isWatchIDPerfectMatch(PhysicalAddress, i))
-              break;
-          }
-      }
-    }
-  }
-
-
-  //nosendchar[getAPICID()]=0;
-
-  lastSeenEPTWatch.actualID=ID;
-  sendstringf("%d: handling watch ID %d\n", currentcpuinfo->cpunr, ID);
-  sendstringf("%d: RIP=%6\n", currentcpuinfo->cpunr, currentcpuinfo->vmcb->RIP);
-
-
-  //todo: release the eptWatchListCS and obtain only the log
-
-  //ID is now set to the most logical watch(usually there is no conflicts, and even if there is, no biggie. But still)
-
-  PPTE_PAE npte;
-  PEPT_PTE epte;
-
-  lastSeenEPTWatch.cacheIssue=0;
-  if (isAMD)
-  {
-    npte=(PPTE_PAE)currentcpuinfo->eptWatchList[ID];
-    if ((npte->EXB==0) && (npte->P) && (npte->RW))
-    {
-      sendstringf("This entry was already marked with full access (check caches) (AMD)\n");
-      lastSeenEPTWatch.cacheIssue=1;
-    }
-  }
-  else
-  {
-    epte=currentcpuinfo->eptWatchList[ID];
-    if ((epte->XA) && (epte->RA) && (epte->WA))
-    {
-      sendstringf("This entry was already marked with full access (check caches)\n");
-      lastSeenEPTWatch.cacheIssue=1;
-    }
-  }
-
-
-  if ((eptWatchList[ID].Options & EPTO_DBVMBP) && (PhysicalAddress>=eptWatchList[ID].PhysicalAddress) && (PhysicalAddress<eptWatchList[ID].PhysicalAddress+eptWatchList[ID].Size))
-  {
-    nosendchar[getAPICID()]=0;
-    sendstringf("%d: EPTO_DBVMBP hit (RIP=%6)\n", currentcpuinfo->cpunr, isAMD?currentcpuinfo->vmcb->RIP:vmread(vm_guest_rip));
-    //This is the specific address that was being requested
-    //if the current state has interrupts disabled or masked (cr8<>0) then skip (todo: step until it is)
-
-    DWORD CR8=getCR8();
-    RFLAGS flags;
-    flags.value=isAMD?currentcpuinfo->vmcb->RFLAGS:vmread(vm_guest_rflags);
-    int is;
-    int canBreak=(CR8==0) && (flags.IF); //interruptable with no mask (on windows called passive mode)
-
-    if (isAMD)
-    {
-      sendstringf("CR8=%6 IF=%d RF=%d\n", CR8,flags.IF,flags.RF);
-      canBreak=canBreak && (flags.RF==0); //on AMD I use the TF flag to skip over dbvmbp watches
-    }
-    else
-    {
-      is=vmread(vm_guest_interruptability_state);
-      sendstringf("CR8=%6 IF=%d RF=%d Interruptibility state=%d\n", CR8,flags.IF,flags.RF, is);
-      canBreak=canBreak && ((is & (1<<0))==0); //on Intel I use the block by sti interruptability state to flag a skip (probably can't use the pop ss as it's used by the single step handler. But should test)
-    }
-
-    sendstringf("canBreak=%d\n", canBreak);
-
-    if (canBreak)
-    {
-      int kernelmode=0;
-      if (isAMD)
-      {
-        Segment_Attribs csattrib;
-        csattrib.SegmentAttrib=currentcpuinfo->vmcb->cs_attrib;
-        kernelmode=csattrib.DPL==0;
-      }
-      else
-      {
-        Access_Rights csar;
-        csar.AccessRights=vmread(vm_guest_cs_access_rights);
-        kernelmode=csar.DPL==0;
-      }
-
-      QWORD newRIP=kernelmode?eptWatchList[ID].LoopKernelMode:eptWatchList[ID].LoopUserMode;
-
-      if (newRIP) //e.g if no kernelmode is provided, skip kernelmode (needed for read/write watches as those will also see CE. Just trigger a COW please...)
-      {
-
-        //nosendchar[getAPICID()]=0;
-
-        lastSeenEPTWatch.skipped=-1;
-        csLeave(&eptWatchListCS);
-
-
-        sendstringf("EPTO_DBVMBP: Interruptable state. 'Breaking' this code (Saving the state and setting it to RIP %6 )\n", newRIP);
-
-        //save this thread's data in a structure so that when the int3 keepalive happens dbvm knows to skip it
-        BrokenThreadEntry e;
-        e.inuse=1;
-        e.continueMethod=0;
-        e.watchid=ID;
-        e.UserModeLoop=eptWatchList[ID].LoopUserMode;
-        e.KernelModeLoop=eptWatchList[ID].LoopKernelMode;
-
-        fillPageEventBasic(&e.state.basic, registers);
-        e.state.fpudata=*fxsave;
-
-        if (isAMD)
-          currentcpuinfo->vmcb->RIP=newRIP;
-        else
-          vmwrite(vm_guest_rip, newRIP);
-
-
-        csEnter(&BrokenThreadListCS);
-        if (BrokenThreadList==NULL)
-        {
-          //allocate the list
-          BrokenThreadList=malloc(sizeof(BrokenThreadEntry)*8);
-          BrokenThreadListSize=8;
-          BrokenThreadListPos=0;
-        }
-
-        if (BrokenThreadListPos>=BrokenThreadListSize) //list full
-        {
-          void *oldaddress=(void *)BrokenThreadList;
-          BrokenThreadList=(BrokenThreadEntry *)realloc(BrokenThreadList, BrokenThreadListSize+sizeof(BrokenThreadEntry)*32); //add 32
-          BrokenThreadListSize+=32;
-        }
-
-        //find an unused spot, else add to the end
-        for (i=0; i<BrokenThreadListPos; i++)
-        {
-          if (BrokenThreadList[i].inuse==0)
-          {
-            BrokenThreadList[i]=e;
-            if (isAMD)
-              currentcpuinfo->vmcb->RAX=i; //rax was already saved in the pageeventbasic structure. Use rax as brokenthreadlist id
-            else
-              registers->rax=i;
-
-            csLeave(&BrokenThreadListCS);
-            return TRUE; //no need to log it or continue
-          }
-        }
-
-        //still here, so add it to the end
-        BrokenThreadList[BrokenThreadListPos]=e;
-        if (isAMD)
-          currentcpuinfo->vmcb->RAX=BrokenThreadListPos;
-        else
-          registers->rax=BrokenThreadListPos;
-
-        BrokenThreadListPos++;
-        csLeave(&BrokenThreadListCS);
-
-        return TRUE; //no need to log it or continue
-      }
-    }
-    else
-    {
-      sendstring("Not breaking this\n");
-    }
-
-  }
-
-
-  //run once
-
-  sendstringf("%d Making page fully accessible\n", currentcpuinfo->cpunr);
-
-  if (isAMD)
-  {
-    npte->EXB=0;  //execute allow
-    npte->P=1;    //read allow
-    npte->RW=1;   //write allow
-  }
-  else
-  {
-    currentcpuinfo->eptWatchList[ID]->XA=1; //execute allow
-    currentcpuinfo->eptWatchList[ID]->RA=1; //read allow
-    currentcpuinfo->eptWatchList[ID]->WA=1; //write allow
-  }
-  sendstringf("Page is accessible. Doing single step\n");
-
-  vmx_enableSingleStepMode();
-  vmx_addSingleSteppingReason(currentcpuinfo, SSR_HANDLEWATCH, ID);
-
-  if (eptWatchList[ID].Options & EPTO_DBVMBP)
-  {
-    sendstringf("%d: Returning from ept_handleevent\n", currentcpuinfo->cpunr);
-    csLeave(&eptWatchListCS);
-    return TRUE;
-  }
-
-  /*todo:
-  if ((eptWatchList[ID].Options & EPTO_DBVMBP) && (PhysicalAddress>=eptWatchList[ID].PhysicalAddress) && (PhysicalAddress<eptWatchList[ID].PhysicalAddress+eptWatchList[ID].Size))
-  {
-    //still happened? And kernelloop/userloop is valid? Then it's a step until interruptable
-  }
-  */
-
-  if ((eptWatchList[ID].Options & EPTO_INTERRUPT) && (PhysicalAddress>=eptWatchList[ID].PhysicalAddress) && (PhysicalAddress<eptWatchList[ID].PhysicalAddress+eptWatchList[ID].Size))
-  {
-    //This is the specific address that was being requested
-    lastSeenEPTWatch.skipped=1; //it's an interrupt triggering one (rare)
-    currentcpuinfo->BPAfterStep=1;
-    csLeave(&eptWatchListCS);
-    return TRUE; //no need to log it
-  }
-
-  //save this state?
-  if ((isAMD==0) && (eptWatchList[ID].Type!=EPTW_EXECUTE) && (evi.R==0) && (evi.X==1))
-  {
-    sendstringf("This was an execute operation and no read. No need to log\n", ID);
-    lastSeenEPTWatch.skipped=2;
-    csLeave(&eptWatchListCS);
-    return TRUE; //execute operation (this cpu doesn't support execute only)
-  }
-
-  if (eptWatchList[ID].CopyInProgress) //a copy operation is in progress
-  {
-    lastSeenEPTWatch.skipped=3; //copy was in progress.
-    eptWatchList[ID].Log->missedEntries++;
-    sendstringf("This watchlist is currently being copied, not logging this\n");
-    csLeave(&eptWatchListCS);
-    return TRUE;
-  }
-
-  if (((eptWatchList[ID].Options & EPTO_LOG_ALL)==0) &&
-     (
-      (PhysicalAddress<eptWatchList[ID].PhysicalAddress) ||
-      (PhysicalAddress>=eptWatchList[ID].PhysicalAddress+eptWatchList[ID].Size)
-      ))
-  {
-    QWORD RIP=isAMD?currentcpuinfo->vmcb->RIP:vmread(vm_guest_rip);
-    lastSeenEPTWatch.skipped=4; //not a perfect physical address match
-    sendstringf("%d: Not logging all and the physical address(%6) is not in the exact range (%p-%p)\n", currentcpuinfo->cpunr, PhysicalAddress, eptWatchList[ID].PhysicalAddress, eptWatchList[ID].PhysicalAddress+eptWatchList[ID].Size);
-    sendstringf("RIP was %6\n", RIP);
-    csLeave(&eptWatchListCS);
-    return TRUE; //no need to log it
-  }
-
-  lastSeenEPTWatchVerySure=lastSeenEPTWatch;
-
-
-
-  //scan if this RIP is already in the list
-
-  switch (eptWatchList[ID].Log->entryType)
-  {
-    case 0: logentrysize=sizeof(PageEventBasic); break;
-    case 1: logentrysize=sizeof(PageEventExtended); break;
-    case 2: logentrysize=sizeof(PageEventBasicWithStack); break;
-    case 3: logentrysize=sizeof(PageEventExtendedWithStack); break;
-  }
-
-  sendstringf("Want to log this. Type=%d EntrySize=%d\n", eptWatchList[ID].Log->entryType, logentrysize);
-
-  for (i=0; (DWORD)i<eptWatchList[ID].Log->numberOfEntries; i++)
-  {
-    PageEventBasic *peb=(PageEventBasic *)((QWORD)(&eptWatchList[ID].Log->pe.basic[0])+i*logentrysize);
-    //every type starts with a PageEventBasic
-
-    if (peb->RIP==RIP)
-    {
-      sendstringf("This RIP is already logged");
-      //it's already in the list
-      if ((eptWatchList[ID].Options & EPTO_MULTIPLERIP)==0)
-      {
-        sendstringf(" and EPTO_MULTIPLERIP is 0.  Not logging (just increase count)\n");
-        peb->Count++;
-        csLeave(&eptWatchListCS);
-
-        lastSeenEPTWatch.skipped=5;
-        lastSeenEPTWatchVerySure.skipped=5; //already logged
-        return TRUE; //no extra RIP's
-      }
-      else
-        sendstringf(" but EPTO_MULTIPLERIP is 1, so checking register states\n");
-
-      //still here, so multiple RIP's are ok. check if it matches the other registers
-      if (isAMD)
-        registers->rax=currentcpuinfo->vmcb->RAX;
-
-      if (
-          (peb->RSP==RSP) &&
-          (peb->RBP==registers->rbp) &&
-          (peb->RAX==registers->rax) &&
-          (peb->RBX==registers->rbx) &&
-          (peb->RCX==registers->rcx) &&
-          (peb->RDX==registers->rdx) &&
-          (peb->RSI==registers->rsi) &&
-          (peb->RDI==registers->rdi) &&
-          (peb->R8==registers->r8) &&
-          (peb->R9==registers->r9) &&
-          (peb->R10==registers->r10) &&
-          (peb->R11==registers->r11) &&
-          (peb->R12==registers->r12) &&
-          (peb->R13==registers->r13) &&
-          (peb->R14==registers->r14) &&
-          (peb->R15==registers->r15)
-        )
-      {
-        sendstringf("  The registers match the state so skipping the log. (Just increase count)\n");
-        peb->Count++;
-        csLeave(&eptWatchListCS);
-
-        lastSeenEPTWatch.skipped=6;
-        lastSeenEPTWatchVerySure.skipped=6; //already logged and not different
-
-        return TRUE; //already in the list
-      }
-
-    }
-
-  }
-
-  //still here, so not in the list
-  sendstringf("Checks out ok. Not yet in the list\n");
-
-  if (eptWatchList[ID].Log->numberOfEntries>=eptWatchList[ID].Log->maxNumberOfEntries)
-  {
-
-    sendstringf("List is full.  (%d / %d) ", eptWatchList[ID].Log->numberOfEntries, eptWatchList[ID].Log->maxNumberOfEntries);
-    if ((eptWatchList[ID].Options & EPTO_GROW_WHENFULL)==0)
-    {
-      sendstringf(". Discarding event\n");
-      eptWatchList[ID].Log->missedEntries++;
-      csLeave(&eptWatchListCS);
-      lastSeenEPTWatch.skipped=7;
-      lastSeenEPTWatchVerySure.skipped=7; //list full
-      return TRUE; //can't add more
-    }
-
-    //reallocate the buffer
-
-    int newmax=eptWatchList[ID].Log->numberOfEntries*2;
-    PPageEventListDescriptor temp=realloc(eptWatchList[ID].Log, sizeof(PageEventListDescriptor)+logentrysize*newmax);
-    if (temp!=NULL)
-    {
-      sendstringf(" so growing it\n");
-      eptWatchList[ID].Log=temp;
-      eptWatchList[ID].Log->numberOfEntries=newmax;
-    }
-    else
-    {
-      sendstringf(" and out of memory (fuuuuu)\n");
-
-      eptWatchList[ID].Options=eptWatchList[ID].Options & (~EPTO_GROW_WHENFULL); //stop trying
-      eptWatchList[ID].Log->missedEntries++;
-      csLeave(&eptWatchListCS);
-
-      lastSeenEPTWatch.skipped=8; //list full and out of memory
-      lastSeenEPTWatchVerySure.skipped=8;
-      return TRUE; //can't add more
-    }
-
-  }
-
-  //still here, so not in the list, and still room
-  //add it
-
-
-
-  i=eptWatchList[ID].Log->numberOfEntries;
-  switch (eptWatchList[ID].Log->entryType)
-  {
-    case PE_BASIC:
-    {
-      fillPageEventBasic(&eptWatchList[ID].Log->pe.basic[i], registers);
-      break;
-    }
-
-    case PE_EXTENDED:
-    {
-      fillPageEventBasic(&eptWatchList[ID].Log->pe.extended[i].basic, registers);
-      eptWatchList[ID].Log->pe.extended[i].fpudata=*fxsave;
-      break;
-    }
-
-    case PE_BASICSTACK:
-    {
-      fillPageEventBasic(&eptWatchList[ID].Log->pe.basics[i].basic, registers);
-      saveStack(currentcpuinfo, eptWatchList[ID].Log->pe.basics[i].stack);
-      break;
-    }
-
-    case PE_EXTENDEDSTACK:
-    {
-      fillPageEventBasic(&eptWatchList[ID].Log->pe.extendeds[i].basic, registers);
-      eptWatchList[ID].Log->pe.extendeds[i].fpudata=*fxsave;
-      saveStack(currentcpuinfo, eptWatchList[ID].Log->pe.extendeds[i].stack);
-      break;
-    }
-  }
-
-  eptWatchList[ID].Log->numberOfEntries++;
-
-  lastSeenEPTWatch.skipped=0;
-  lastSeenEPTWatchVerySure.skipped=0; //got added to the list
-
-  sendstringf("Added it to the list. numberOfEntries for ID %d is now %d\n", ID, eptWatchList[ID].Log->numberOfEntries);
-
-  csLeave(&eptWatchListCS);
-
-  return TRUE;
-
+BOOL ept_handleWatchEvent(pcpuinfo currentcpuinfo, VMRegisters *registers, PFXSAVE64 fxsave, QWORD PhysicalAddress) {
+	//Used by Intel and AMD
+	EPT_VIOLATION_INFO evi;
+	NP_VIOLATION_INFO nvi;
+
+	int ID = 0;
+	int logentrysize = 0;
+	int i = 0;
+
+	if (eptWatchListPos == 0) {
+		return FALSE;
+	}
+
+	if (isAMD) {
+		nvi.ErrorCode = currentcpuinfo->vmcb->EXITINFO1;
+		if (nvi.ID) {
+			//instruction fetch.  Apparently, PA is not exact and on a 16 byte radius or worse
+			sendstringf("INF: ept_handleWatchEvent execute (ID) on AMD.  RIP=%6 PA=%6\n", currentcpuinfo->vmcb->RIP, PhysicalAddress);
+			PhysicalAddress = (PhysicalAddress & 0xfffffffffffff000ULL) | (currentcpuinfo->vmcb->RIP & 0xfff);
+			sendstringf("INF: changed PhysicalAddress to %6\n", PhysicalAddress);
+		}
+	} else {
+		evi.ExitQualification = vmread(vm_exit_qualification);
+	}
+
+	csEnter(&eptWatchListCS);
+	ID = ept_getWatchID(PhysicalAddress);
+
+	if (ID == -1) {
+		csLeave(&eptWatchListCS);
+		return FALSE;
+	}
+
+	if (isAMD) {
+		lastSeenEPTWatch.data = nvi.ErrorCode;
+	} else {
+		lastSeenEPTWatch.data = evi.ExitQualification;
+	}
+
+	lastSeenEPTWatch.physicalAddress = PhysicalAddress;
+	lastSeenEPTWatch.initialID = ID;
+
+	QWORD RIP = 0;
+	QWORD RSP = 0;
+
+	sendstring("INF: EPT/NP event and there is a watchlist entry\n");
+	sendstringf("INF: ept_getWatchID returned %d\n", ID);
+
+	if (isAMD) {
+		RIP = currentcpuinfo->vmcb->RIP;
+		RSP = currentcpuinfo->vmcb->RSP;
+	} else {
+		RIP = vmread(vm_guest_rip);
+		RSP = vmread(vm_guest_rsp);
+	}
+
+	lastSeenEPTWatch.skipped = -1;
+	lastSeenEPTWatch.rip = RIP;
+
+	QWORD PhysicalAddressBase = PhysicalAddress & 0xfffffffffffff000ULL;
+
+	//nosendchar[getAPICID()]=0;
+	sendstringf("INF: Handling something that resembles watch ID %d\n", ID);
+
+	//figure out which access it is really (in case of multiple on the same page)
+	for (i = ID; i < eptWatchListPos; i++) {
+		if (ept_isWatchIDMatch(PhysicalAddressBase, i)) {
+			if (eptWatchList[ID].Type == EPTW_WRITE) {
+				//must be a write operation error
+				if (((!isAMD) && (evi.W) && (evi.WasWritable == 0)) || (isAMD && nvi.W))  { //write operation and writable was 0
+					ID = i;
+
+					if (ept_isWatchIDPerfectMatch(PhysicalAddress, i)) {
+						break;
+					}
+				}
+			} else if (eptWatchList[ID].Type==EPTW_READWRITE) {
+				//must be a read or write operation
+				if ((isAMD && nvi.P == 0) || ((!isAMD) && (((evi.W) && (evi.WasWritable == 0)) || ((evi.R) && (evi.WasReadable == 0))))) { //write operation and writable was 0 or read and readable was 0
+					ID = i;
+					if (ept_isWatchIDPerfectMatch(PhysicalAddress, i)) {
+						break;
+					}
+				}
+			} else {
+				if ((isAMD && nvi.ID) || ((!isAMD) && (evi.X) && (evi.WasExecutable == 0))) { //execute operation and executable was 0
+					ID = i;
+
+					if (ept_isWatchIDPerfectMatch(PhysicalAddress, i)) {
+						break;
+					}
+				}
+			}
+		}
+	}
+	//nosendchar[getAPICID()]=0;
+
+	lastSeenEPTWatch.actualID=ID;
+	sendstringf("INF: %d: handling watch ID %d\n", currentcpuinfo->cpunr, ID);
+	sendstringf("INF: %d: RIP=%6\n", currentcpuinfo->cpunr, currentcpuinfo->vmcb->RIP);
+
+	//todo: release the eptWatchListCS and obtain only the log
+	//ID is now set to the most logical watch(usually there is no conflicts, and even if there is, no biggie. But still)
+	PPTE_PAE npte;
+	PEPT_PTE epte;
+
+	lastSeenEPTWatch.cacheIssue = 0;
+	if (isAMD) {
+		npte = (PPTE_PAE)currentcpuinfo->eptWatchList[ID];
+
+		if ((npte->EXB == 0) && (npte->P) && (npte->RW)) {
+			sendstringf("INF: This entry was already marked with full access (check caches) (AMD)\n");
+			lastSeenEPTWatch.cacheIssue = 1;
+		}
+	} else {
+		epte = currentcpuinfo->eptWatchList[ID];
+
+		if ((epte->XA) && (epte->RA) && (epte->WA)) {
+			sendstringf("INF: This entry was already marked with full access (check caches)\n");
+			lastSeenEPTWatch.cacheIssue = 1;
+		}
+	}
+
+
+	if ((eptWatchList[ID].Options & EPTO_DBVMBP) && 
+			(PhysicalAddress >= eptWatchList[ID].PhysicalAddress) && 
+			(PhysicalAddress<eptWatchList[ID].PhysicalAddress + eptWatchList[ID].Size)) 
+	{
+		nosendchar[getAPICID()] = 0;
+		sendstringf("INF: %d: EPTO_DBVMBP hit (RIP=%6)\n", currentcpuinfo->cpunr, isAMD?currentcpuinfo->vmcb->RIP:vmread(vm_guest_rip));
+		//This is the specific address that was being requested
+		//if the current state has interrupts disabled or masked (cr8<>0) then skip (todo: step until it is)
+
+		DWORD CR8 = getCR8();
+		RFLAGS flags;
+
+		flags.value = isAMD
+			? currentcpuinfo->vmcb->RFLAGS
+			: vmread(vm_guest_rflags);
+
+		int is;
+		int canBreak = (CR8 == 0) && (flags.IF); //interruptable with no mask (on windows called passive mode)
+
+		if (isAMD) {
+			sendstringf("INF: CR8=%6 IF=%d RF=%d\n", CR8,flags.IF,flags.RF);
+			canBreak = canBreak && (flags.RF == 0); //on AMD I use the TF flag to skip over dbvmbp watches
+		} else {
+			is = vmread(vm_guest_interruptability_state);
+			sendstringf("INF: CR8=%6 IF=%d RF=%d Interruptibility state=%d\n", CR8,flags.IF,flags.RF, is);
+			canBreak = canBreak && ((is & (1 << 0)) == 0); //on Intel I use the block by sti interruptability state to flag a skip (probably can't use the pop ss as it's used by the single step handler. But should test)
+		}
+
+		sendstringf("INF: canBreak=%d\n", canBreak);
+		if (canBreak) {
+			int kernelmode = 0;
+
+			if (isAMD) {
+				Segment_Attribs csattrib;
+				csattrib.SegmentAttrib = currentcpuinfo->vmcb->cs_attrib;
+				kernelmode = csattrib.DPL == 0;
+			} else {
+				Access_Rights csar;
+				csar.AccessRights = vmread(vm_guest_cs_access_rights);
+				kernelmode = csar.DPL == 0;
+			}
+
+			QWORD newRIP = kernelmode
+				? eptWatchList[ID].LoopKernelMode
+				: eptWatchList[ID].LoopUserMode;
+
+			if (newRIP) { //e.g if no kernelmode is provided, skip kernelmode (needed for read/write watches as those will also see CE. Just trigger a COW please...)
+						  //nosendchar[getAPICID()]=0;
+				lastSeenEPTWatch.skipped = -1;
+				csLeave(&eptWatchListCS);
+
+				sendstringf("INF: EPTO_DBVMBP: Interruptable state. 'Breaking' this code (Saving the state and setting it to RIP %6 )\n", newRIP);
+
+				//save this thread's data in a structure so that when the int3 keepalive happens dbvm knows to skip it
+				BrokenThreadEntry e;
+				e.inuse = 1;
+				e.continueMethod = 0;
+				e.watchid = ID;
+				e.UserModeLoop = eptWatchList[ID].LoopUserMode;
+				e.KernelModeLoop = eptWatchList[ID].LoopKernelMode;
+
+				fillPageEventBasic(&e.state.basic, registers);
+				e.state.fpudata = *fxsave;
+
+				if (isAMD) {
+					currentcpuinfo->vmcb->RIP = newRIP;
+				} else {
+					vmwrite(vm_guest_rip, newRIP);
+				}
+
+				csEnter(&BrokenThreadListCS);
+				if (BrokenThreadList == NULL) {
+					//allocate the list
+					BrokenThreadList = malloc(sizeof(BrokenThreadEntry) * 8);
+					BrokenThreadListSize = 8;
+					BrokenThreadListPos = 0;
+				}
+
+				if (BrokenThreadListPos>=BrokenThreadListSize) { //list full
+					void *oldaddress = (void*)BrokenThreadList;
+					BrokenThreadList = (BrokenThreadEntry *)realloc(BrokenThreadList, BrokenThreadListSize+sizeof(BrokenThreadEntry) * 32); //add 32
+					BrokenThreadListSize += 32;
+				}
+
+				//find an unused spot, else add to the end
+				for (i = 0; i<BrokenThreadListPos; i++) {
+					if (BrokenThreadList[i].inuse == 0) {
+						BrokenThreadList[i] = e;
+						if (isAMD) {
+							currentcpuinfo->vmcb->RAX = i; //rax was already saved in the pageeventbasic structure. Use rax as brokenthreadlist id
+						} else {
+							registers->rax = i;
+						}
+						csLeave(&BrokenThreadListCS);
+						return TRUE; //no need to log it or continue
+					}
+				}
+
+				//still here, so add it to the end
+				BrokenThreadList[BrokenThreadListPos] = e;
+				if (isAMD) {
+					currentcpuinfo->vmcb->RAX = BrokenThreadListPos;
+				} else {
+					registers->rax = BrokenThreadListPos;
+				}
+
+				BrokenThreadListPos++;
+				csLeave(&BrokenThreadListCS);
+
+				return TRUE; //no need to log it or continue
+			}
+		} else {
+			sendstring("INF: Not breaking this\n");
+		}
+	}
+
+	//run once
+	sendstringf("INF: %d Making page fully accessible\n", currentcpuinfo->cpunr);
+	if (isAMD) {
+		npte->EXB = 0;  //execute allow
+		npte->P = 1;    //read allow
+		npte->RW = 1;   //write allow
+	} else {
+		currentcpuinfo->eptWatchList[ID]->XA = 1; //execute allow
+		currentcpuinfo->eptWatchList[ID]->RA = 1; //read allow
+		currentcpuinfo->eptWatchList[ID]->WA = 1; //write allow
+	}
+	sendstringf("INF: Page is accessible. Doing single step\n");
+
+	vmx_enableSingleStepMode();
+	vmx_addSingleSteppingReason(currentcpuinfo, SSR_HANDLEWATCH, ID);
+
+	if (eptWatchList[ID].Options & EPTO_DBVMBP) {
+		sendstringf("INF: %d: Returning from ept_handleevent\n", currentcpuinfo->cpunr);
+		csLeave(&eptWatchListCS);
+		return TRUE;
+	}
+
+	/*todo:
+	  if ((eptWatchList[ID].Options & EPTO_DBVMBP) && (PhysicalAddress>=eptWatchList[ID].PhysicalAddress) && (PhysicalAddress<eptWatchList[ID].PhysicalAddress+eptWatchList[ID].Size))
+	  {
+	//still happened? And kernelloop/userloop is valid? Then it's a step until interruptable
+	}
+	*/
+	if ((eptWatchList[ID].Options & EPTO_INTERRUPT) && 
+			(PhysicalAddress >= eptWatchList[ID].PhysicalAddress) && 
+			(PhysicalAddress < eptWatchList[ID].PhysicalAddress+eptWatchList[ID].Size))
+	{
+		//This is the specific address that was being requested
+		lastSeenEPTWatch.skipped = 1; //it's an interrupt triggering one (rare)
+		currentcpuinfo->BPAfterStep = 1;
+		csLeave(&eptWatchListCS);
+		return TRUE; //no need to log it
+	}
+
+	//save this state?
+	if ((isAMD == 0) && (eptWatchList[ID].Type != EPTW_EXECUTE) && (evi.R == 0) && (evi.X == 1)) {
+		sendstringf("INF: This was an execute operation and no read. No need to log\n", ID);
+		lastSeenEPTWatch.skipped = 2;
+		csLeave(&eptWatchListCS);
+		return TRUE; //execute operation (this cpu doesn't support execute only)
+	}
+
+	if (eptWatchList[ID].CopyInProgress) { //a copy operation is in progress
+		lastSeenEPTWatch.skipped = 3; //copy was in progress.
+		eptWatchList[ID].Log->missedEntries++;
+		sendstringf("INF: This watchlist is currently being copied, not logging this\n");
+		csLeave(&eptWatchListCS);
+		return TRUE;
+	}
+
+	if (((eptWatchList[ID].Options & EPTO_LOG_ALL)==0) &&
+			((PhysicalAddress < eptWatchList[ID].PhysicalAddress) ||
+			 (PhysicalAddress >= eptWatchList[ID].PhysicalAddress+eptWatchList[ID].Size)
+			))
+	{
+		QWORD RIP = isAMD
+			? currentcpuinfo->vmcb->RIP
+			: vmread(vm_guest_rip);
+
+		lastSeenEPTWatch.skipped = 4; //not a perfect physical address match
+		sendstringf("INF: %d: Not logging all and the physical address(%6) is not in the exact range (%p-%p)\n", currentcpuinfo->cpunr, PhysicalAddress, eptWatchList[ID].PhysicalAddress, eptWatchList[ID].PhysicalAddress+eptWatchList[ID].Size);
+		sendstringf("INF: RIP was %6\n", RIP);
+		csLeave(&eptWatchListCS);
+		return TRUE; //no need to log it
+	}
+
+	lastSeenEPTWatchVerySure = lastSeenEPTWatch;
+
+	//scan if this RIP is already in the list
+	switch (eptWatchList[ID].Log->entryType) {
+		case 0: logentrysize = sizeof(PageEventBasic); break;
+		case 1: logentrysize = sizeof(PageEventExtended); break;
+		case 2: logentrysize = sizeof(PageEventBasicWithStack); break;
+		case 3: logentrysize = sizeof(PageEventExtendedWithStack); break;
+	}
+
+	sendstringf("INF: Want to log this. Type=%d EntrySize=%d\n", eptWatchList[ID].Log->entryType, logentrysize);
+
+	for (i = 0; (DWORD)i < eptWatchList[ID].Log->numberOfEntries; i++) {
+		PageEventBasic *peb = (PageEventBasic *)((QWORD)(&eptWatchList[ID].Log->pe.basic[0]) + i * logentrysize);
+		//every type starts with a PageEventBasic
+		if (peb->RIP == RIP) {
+			sendstringf("INF: This RIP is already logged");
+			//it's already in the list
+			if ((eptWatchList[ID].Options & EPTO_MULTIPLERIP) == 0) {
+				sendstringf(" and EPTO_MULTIPLERIP is 0.  Not logging (just increase count)\n");
+				peb->Count++;
+				csLeave(&eptWatchListCS);
+
+				lastSeenEPTWatch.skipped = 5;
+				lastSeenEPTWatchVerySure.skipped = 5; //already logged
+				return TRUE; //no extra RIP's
+			} else {
+				sendstringf(" but EPTO_MULTIPLERIP is 1, so checking register states\n");
+			}
+
+			//still here, so multiple RIP's are ok. check if it matches the other registers
+			if (isAMD) {
+				registers->rax = currentcpuinfo->vmcb->RAX;
+			}
+
+			if (
+					(peb->RSP == RSP) &&
+					(peb->RBP == registers->rbp) &&
+					(peb->RAX == registers->rax) &&
+					(peb->RBX == registers->rbx) &&
+					(peb->RCX == registers->rcx) &&
+					(peb->RDX == registers->rdx) &&
+					(peb->RSI == registers->rsi) &&
+					(peb->RDI == registers->rdi) &&
+					(peb->R8 == registers->r8) &&
+					(peb->R9 == registers->r9) &&
+					(peb->R10 == registers->r10) &&
+					(peb->R11 == registers->r11) &&
+					(peb->R12 == registers->r12) &&
+					(peb->R13 == registers->r13) &&
+					(peb->R14 == registers->r14) &&
+					(peb->R15 == registers->r15))
+			{
+				sendstringf("  The registers match the state so skipping the log. (Just increase count)\n");
+				peb->Count++;
+				csLeave(&eptWatchListCS);
+
+				lastSeenEPTWatch.skipped = 6;
+				lastSeenEPTWatchVerySure.skipped = 6; //already logged and not different
+
+				return TRUE; //already in the list
+			}
+		}
+	}
+
+	//still here, so not in the list
+	sendstringf("INF: Checks out ok. Not yet in the list\n");
+
+	if (eptWatchList[ID].Log->numberOfEntries >= eptWatchList[ID].Log->maxNumberOfEntries) {
+		sendstringf("INF: List is full.  (%d / %d) ", eptWatchList[ID].Log->numberOfEntries, eptWatchList[ID].Log->maxNumberOfEntries);
+
+		if ((eptWatchList[ID].Options & EPTO_GROW_WHENFULL) == 0) {
+			sendstringf(". Discarding event\n");
+			eptWatchList[ID].Log->missedEntries++;
+			csLeave(&eptWatchListCS);
+			lastSeenEPTWatch.skipped = 7;
+			lastSeenEPTWatchVerySure.skipped = 7; //list full
+			return TRUE; //can't add more
+		}
+
+		//reallocate the buffer
+		int newmax = eptWatchList[ID].Log->numberOfEntries * 2;
+		PPageEventListDescriptor temp = realloc(eptWatchList[ID].Log, sizeof(PageEventListDescriptor) + logentrysize*newmax);
+
+		if (temp != NULL) {
+			sendstringf(" so growing it\n");
+			eptWatchList[ID].Log = temp;
+			eptWatchList[ID].Log->numberOfEntries = newmax;
+		} else {
+			sendstringf(" and out of memory (fuuuuu)\n");
+
+			eptWatchList[ID].Options = eptWatchList[ID].Options & (~EPTO_GROW_WHENFULL); //stop trying
+			eptWatchList[ID].Log->missedEntries++;
+			csLeave(&eptWatchListCS);
+
+			lastSeenEPTWatch.skipped = 8; //list full and out of memory
+			lastSeenEPTWatchVerySure.skipped = 8;
+			return TRUE; //can't add more
+		}
+	}
+
+	//still here, so not in the list, and still room
+	//add it
+	i = eptWatchList[ID].Log->numberOfEntries;
+	switch (eptWatchList[ID].Log->entryType) {
+		case PE_BASIC:
+			{
+				fillPageEventBasic(&eptWatchList[ID].Log->pe.basic[i], registers);
+				break;
+			}
+
+		case PE_EXTENDED:
+			{
+				fillPageEventBasic(&eptWatchList[ID].Log->pe.extended[i].basic, registers);
+				eptWatchList[ID].Log->pe.extended[i].fpudata = *fxsave;
+				break;
+			}
+
+		case PE_BASICSTACK:
+			{
+				fillPageEventBasic(&eptWatchList[ID].Log->pe.basics[i].basic, registers);
+				saveStack(currentcpuinfo, eptWatchList[ID].Log->pe.basics[i].stack);
+				break;
+			}
+
+		case PE_EXTENDEDSTACK:
+			{
+				fillPageEventBasic(&eptWatchList[ID].Log->pe.extendeds[i].basic, registers);
+				eptWatchList[ID].Log->pe.extendeds[i].fpudata = *fxsave;
+				saveStack(currentcpuinfo, eptWatchList[ID].Log->pe.extendeds[i].stack);
+				break;
+			}
+	}
+
+	eptWatchList[ID].Log->numberOfEntries++;
+
+	lastSeenEPTWatch.skipped = 0;
+	lastSeenEPTWatchVerySure.skipped = 0; //got added to the list
+
+	sendstringf("INF: Added it to the list. numberOfEntries for ID %d is now %d\n", ID, eptWatchList[ID].Log->numberOfEntries);
+	csLeave(&eptWatchListCS);
+
+	return TRUE;
 }
 
-int ept_handleWatchEventAfterStep(pcpuinfo currentcpuinfo,  int ID)
-{
-  sendstringf("%d ept_handleWatchEventAfterStep %d  Type=%d\n", currentcpuinfo->cpunr, ID, eptWatchList[ID].Type);
+int ept_handleWatchEventAfterStep(pcpuinfo currentcpuinfo, int ID) {
+	sendstringf("INF: %d ept_handleWatchEventAfterStep %d  Type=%d\n", currentcpuinfo->cpunr, ID, eptWatchList[ID].Type);
 
-  if (isAMD)
-    sendstringf("%d CS:RIP=%x:%6\n", currentcpuinfo->cpunr, currentcpuinfo->vmcb->cs_selector, currentcpuinfo->vmcb->RIP);
+	if (isAMD) {
+		sendstringf("INF: %d CS:RIP=%x:%6\n", currentcpuinfo->cpunr, currentcpuinfo->vmcb->cs_selector, currentcpuinfo->vmcb->RIP);
+	}
+	if (ID>eptWatchListPos) {
+		sendstring("INF: Invalid ID\n");
+		return 0;
+	}
+	if (eptWatchList[ID].Active == 0) {
+		sendstring("INF: Inactive ID\n");
+		return 0;
+	}
 
-  if (ID>eptWatchListPos)
-  {
-    sendstring("Invalid ID\n");
-    return 0;
-  }
+	switch (eptWatchList[ID].Type) {
+		case EPTW_WRITE:
+			{
+				sendstringf("INF: Write type. So making it unwritable\n");
+				if (isAMD) {
+					PPTE_PAE pte = (PPTE_PAE)currentcpuinfo->eptWatchList[ID];
 
+					if (pte)  {
+						UINT64 oldvalue = *(UINT64*)pte;
+						pte->RW = 0;
 
-  if (eptWatchList[ID].Active==0)
-  {
-    sendstring("Inactive ID\n");
-    return 0;
-  }
+						UINT64 newvalue = *(UINT64*)pte;
+						sendstringf("INF: %6 -> %6\n", oldvalue, newvalue);
+					}
+				} else {
+					currentcpuinfo->eptWatchList[ID]->WA =0;
+					break;
+				}
+			}
 
+		case EPTW_READWRITE:
+			{
+				sendstringf("INF: read type. So making it unreadable\n");
 
+				if (isAMD) {
+					PPTE_PAE pte = (PPTE_PAE)currentcpuinfo->eptWatchList[ID];
+					pte->P = 0;
+				} else {
+					currentcpuinfo->eptWatchList[ID]->RA = 0;
+					currentcpuinfo->eptWatchList[ID]->WA = 0;
 
+					if (has_EPT_ExecuteOnlySupport) {
+						currentcpuinfo->eptWatchList[ID]->XA=1;
+					} else {
+						currentcpuinfo->eptWatchList[ID]->XA=0;
+					}
+				}
+				break;
+			}
 
-  switch (eptWatchList[ID].Type)
-  {
-  	  case EPTW_WRITE:
-  	  {
-  	    sendstringf("Write type. So making it unwritable\n");
+		case EPTW_EXECUTE:
+			{
+				sendstringf("INF: %d: execute type. So making it non-executable\n", currentcpuinfo->cpunr);
 
-  	    if (isAMD)
-  	    {
-  	      PPTE_PAE pte;
-  	      pte=(PPTE_PAE)currentcpuinfo->eptWatchList[ID];
-  	      if (pte)
-  	      {
-            UINT64 oldvalue=*(UINT64 *)pte;
-            pte->RW=0;
+				if (isAMD) {
+					PPTE_PAE pte = (PPTE_PAE)currentcpuinfo->eptWatchList[ID];
+					pte->EXB = 1;
+				} else {
+					currentcpuinfo->eptWatchList[ID]->XA = 0;
+					break;
+				}
+			}
+	}
 
-            UINT64 newvalue=*(UINT64 *)pte;
-
-            sendstringf("%6 -> %6\n", oldvalue, newvalue);
-  	      }
-
-  	    }
-  	    else
-  	      currentcpuinfo->eptWatchList[ID]->WA=0;
-  		  break;
-  	  }
-
-  	  case EPTW_READWRITE:
-  	  {
-  	    sendstringf("read type. So making it unreadable\n");
-  	    if (isAMD)
-  	    {
-  	      PPTE_PAE pte;
-  	      pte=(PPTE_PAE)currentcpuinfo->eptWatchList[ID];
-  	      pte->P=0;
-  	    }
-  	    else
-  	    {
-          currentcpuinfo->eptWatchList[ID]->RA=0;
-          currentcpuinfo->eptWatchList[ID]->WA=0;
-          if (has_EPT_ExecuteOnlySupport)
-            currentcpuinfo->eptWatchList[ID]->XA=1;
-          else
-            currentcpuinfo->eptWatchList[ID]->XA=0;
-  	    }
-
-  		  break;
-  	  }
-
-  	  case EPTW_EXECUTE:
-  	  {
-
-  	    sendstringf("%d: execute type. So making it non-executable\n", currentcpuinfo->cpunr);
-        if (isAMD)
-        {
-          PPTE_PAE pte;
-          pte=(PPTE_PAE)currentcpuinfo->eptWatchList[ID];
-          pte->EXB=1;
-        }
-        else
-          currentcpuinfo->eptWatchList[ID]->XA=0;
-
-  		  break;
-  	  }
-  }
-
-  //todo: If enabled , and the watch actually got hit, trigger a DBG interrupt
-  //      Keep in mind that CE reading memory may also trigger access interrupts so those need to be
-  //      ignored by the driver
+	//todo: If enabled , and the watch actually got hit, trigger a DBG interrupt
+	//      Keep in mind that CE reading memory may also trigger access interrupts so those need to be
+	//      ignored by the driver
 
 
-  if (currentcpuinfo->BPAfterStep)
-  {
-    if (isAMD)
-    {
-      sendstringf("AMD: BP after STEP\n");
-      currentcpuinfo->vmcb->inject_Type=3; //exception
-      currentcpuinfo->vmcb->inject_Vector=int1redirection;
-      currentcpuinfo->vmcb->inject_Valid=1;
-      currentcpuinfo->vmcb->inject_EV=0;
-    }
-    else
-    {
-      if (int1redirection_idtbypass)
-      {
-        regDR7 dr7;
-        //disable GD bit before int1
-        dr7.DR7=vmread(vm_guest_dr7);
-        dr7.GD=0;
-        vmwrite(vm_guest_dr7,dr7.DR7);
+	if (currentcpuinfo->BPAfterStep) {
+		if (isAMD) {
+			sendstringf("INF: AMD: BP after STEP\n");
+			currentcpuinfo->vmcb->inject_Type = 3; //exception
+			currentcpuinfo->vmcb->inject_Vector = int1redirection;
+			currentcpuinfo->vmcb->inject_Valid = 1;
+			currentcpuinfo->vmcb->inject_EV = 0;
+		} else {
+			if (int1redirection_idtbypass) {
+				regDR7 dr7;
+				//disable GD bit before int1
+				dr7.DR7 = vmread(vm_guest_dr7);
+				dr7.GD = 0;
 
-        emulateExceptionInterrupt(currentcpuinfo, NULL, int1redirection_idtbypass_cs, int1redirection_idtbypass_rip, 0, 0, 0);
-      }
-      else
-      {
-        vmwrite(vm_pending_debug_exceptions,0x4000); //for OS'es without the need for int1 redirects
-      }
-    }
+				vmwrite(vm_guest_dr7,dr7.DR7);
+				emulateExceptionInterrupt(currentcpuinfo, NULL, int1redirection_idtbypass_cs, int1redirection_idtbypass_rip, 0, 0, 0);
+			} else {
+				vmwrite(vm_pending_debug_exceptions, 0x4000); //for OS'es without the need for int1 redirects
+			}
+		}
+		currentcpuinfo->BPAfterStep = 0;
+		currentcpuinfo->BPCausedByDBVM = 1;
+	}
 
-    currentcpuinfo->BPAfterStep=0;
-    currentcpuinfo->BPCausedByDBVM=1;
+	sendstring("INF: Calling ept_invalidate\n");
+	ept_invalidate();
 
-  }
-
-  sendstring("Calling ept_invalidate\n");
-
-  ept_invalidate();
-  return 0;
+	return 0;
 }
 
+VMSTATUS ept_traceonbp_retrievelog(QWORD results, DWORD *resultSize, DWORD *offset, QWORD *errorcode) {
+	//same as ept_watch_retrievelog, but there's only only one list
+	//sendstringf("ept_watch_retrievelog(ID=%d)\n", ID);
 
+	sendstring("INF: ept_traceonbp_retrievelog\n");
+	csEnter(&CloakedPagesCS);
 
-VMSTATUS ept_traceonbp_retrievelog(QWORD results, DWORD *resultSize, DWORD *offset, QWORD *errorcode)
-//same as ept_watch_retrievelog, but there's only only one list
-{
+	DWORD sizeneeded = 8;
+	int maxid = TraceOnBP->numberOfEntries;
 
-  //sendstringf("ept_watch_retrievelog(ID=%d)\n", ID);
+	switch (TraceOnBP->datatype) {
+		case PE_BASIC:
+			{
+				sizeneeded += (QWORD)(&TraceOnBP->pe.basic[maxid]) - (QWORD)(&TraceOnBP->datatype);
+				break;
+			}
 
-  sendstring("ept_traceonbp_retrievelog\n");
+		case PE_EXTENDED:
+			{
+				sizeneeded += (QWORD)(&TraceOnBP->pe.extended[maxid]) - (QWORD)(&TraceOnBP->datatype);
+				break;
+			}
 
-  csEnter(&CloakedPagesCS);
+		case 2:
+			{
+				sizeneeded += (QWORD)(&TraceOnBP->pe.basics[maxid]) - (QWORD)(&TraceOnBP->datatype);
+				break;
+			}
 
-  DWORD sizeneeded=8;
-  int maxid=TraceOnBP->numberOfEntries;
+		case 3:
+			{
+				sizeneeded += (QWORD)(&TraceOnBP->pe.extendeds[maxid]) - (QWORD)(&TraceOnBP->datatype);
+				break;
+			}
+	}
 
-  switch (TraceOnBP->datatype)
-  {
-    case PE_BASIC:
-      sizeneeded+=(QWORD)(&TraceOnBP->pe.basic[maxid])-(QWORD)(&TraceOnBP->datatype);
-      break;
+	sendstringf("INF: sizeneeded=%d  *resultSize=%d\n", sizeneeded, *resultSize);
 
-    case PE_EXTENDED:
-      sizeneeded+=(QWORD)(&TraceOnBP->pe.extended[maxid])-(QWORD)(&TraceOnBP->datatype);
-      break;
+	if ((*resultSize) < sizeneeded) {
+		sendstringf("INF: Too small\n");
+		*resultSize = sizeneeded;
 
-    case 2:
-      sizeneeded+=(QWORD)(&TraceOnBP->pe.basics[maxid])-(QWORD)(&TraceOnBP->datatype);
-      break;
+		if (isAMD) {
+			if (AMD_hasNRIPS) {
+				getcpuinfo()->vmcb->RIP = getcpuinfo()->vmcb->nRIP;
+			} else {
+				getcpuinfo()->vmcb->RIP += 3;
+			}
+		} else {
+			vmwrite(vm_guest_rip, vmread(vm_guest_rip) + vmread(vm_exit_instructionlength));
+		}
 
-    case 3:
-      sizeneeded+=(QWORD)(&TraceOnBP->pe.extendeds[maxid])-(QWORD)(&TraceOnBP->datatype);
-      break;
-  }
+		*errorcode = 2; //invalid size
+		csLeave(&CloakedPagesCS);
+		return VM_OK;
+	}
 
-  sendstringf("sizeneeded=%d  *resultSize=%d\n", sizeneeded, *resultSize);
+	if (results == 0) {
+		sendstringf("INF: results==0\n");
 
+		if (isAMD) {
+			if (AMD_hasNRIPS) {
+				getcpuinfo()->vmcb->RIP = getcpuinfo()->vmcb->nRIP;
+			} else {
+				getcpuinfo()->vmcb->RIP += 3;
+			}
+		} else {
+			vmwrite(vm_guest_rip, vmread(vm_guest_rip) + vmread(vm_exit_instructionlength));
+		}
 
-  if ((*resultSize) < sizeneeded)
-  {
-    sendstringf("Too small\n");
-    *resultSize=sizeneeded;
-    if (isAMD)
-    {
-      if (AMD_hasNRIPS)
-        getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-      else
-        getcpuinfo()->vmcb->RIP+=3;
-    }
-    else
-      vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
-    *errorcode=2; //invalid size
-    csLeave(&CloakedPagesCS);
-    return VM_OK;
-  }
+		*errorcode = 4; //results==0
+		csLeave(&CloakedPagesCS);
+		return VM_OK;
+	}
 
+	if ((*offset) > sizeneeded) {
+		sendstringf("INF: (*offset)>sizeneeded\n");
 
+		if (isAMD) {
+			if (AMD_hasNRIPS) {
+				getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
+			} else {
+				getcpuinfo()->vmcb->RIP += 3;
+			}
+		} else {
+			vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
+		}
 
-  if (results==0)
-  {
-    sendstringf("results==0\n");
-    if (isAMD)
-    {
-      if (AMD_hasNRIPS)
-        getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-      else
-        getcpuinfo()->vmcb->RIP+=3;
-    }
-    else
-      vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
-    *errorcode=4; //results==0
-    csLeave(&CloakedPagesCS);
-    return VM_OK;
-  }
+		*errorcode = 6; //offset is too high
+		csLeave(&CloakedPagesCS);
+		return VM_OK;
+	}
 
-  if ((*offset)>sizeneeded)
-  {
-    sendstringf("(*offset)>sizeneeded\n");
-    if (isAMD)
-    {
-      if (AMD_hasNRIPS)
-        getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-      else
-        getcpuinfo()->vmcb->RIP+=3;
-    }
-    else
-      vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
-    *errorcode=6; //offset is too high
-    csLeave(&CloakedPagesCS);
-    return VM_OK;
-  }
+	int sizeleft = sizeneeded - (*offset); //decrease bytes left by bytes already copied
+	sendstringf("INF: *offset=%d\n", *offset);
+	sendstringf("INF: sizeleft=%d\n", sizeleft);
 
+	int error = 0;
+	QWORD pagefaultaddress = 0;
+	QWORD destinationaddress = results+(*offset);
+	int blocksize = sizeleft;
 
+	if (blocksize > 16 * 4096) {
+		blocksize = 16 * 4096;
+	}
 
-  int sizeleft=sizeneeded-(*offset); //decrease bytes left by bytes already copied
-  sendstringf("*offset=%d\n", *offset);
-  sendstringf("sizeleft=%d\n", sizeleft);
+	sendstringf("INF: TraceOnBP->datatype=%d\n",TraceOnBP->datatype);
+	sendstringf("INF: TraceOnBP->numberOfEntries=%d\n",TraceOnBP->numberOfEntries);
 
-  int error;
-  QWORD pagefaultaddress;
-  QWORD destinationaddress=results+(*offset);
-  int blocksize=sizeleft;
-  if (blocksize>16*4096)
-    blocksize=16*4096;
+	unsigned char *source = (unsigned char*)(QWORD)(&TraceOnBP->datatype) + (*offset);
+	unsigned char *destination = mapVMmemoryEx(NULL, destinationaddress, blocksize, &error, &pagefaultaddress, 1);
 
+	if (error) {
+		sendstringf("INF: Error during map (%d)\n", error);
 
-  sendstringf("TraceOnBP->datatype=%d\n",TraceOnBP->datatype);
-  sendstringf("TraceOnBP->numberOfEntries=%d\n",TraceOnBP->numberOfEntries);
+		if (error == 2) {
+			sendstringf("INF: Pagefault at address %x\n", pagefaultaddress);
+			blocksize = pagefaultaddress - destinationaddress;
 
-  unsigned char *source=(unsigned char *)(QWORD)(&TraceOnBP->datatype)+(*offset);
-  unsigned char *destination=mapVMmemoryEx(NULL, destinationaddress, blocksize, &error, &pagefaultaddress,1);
+			sendstringf("INF: blocksize=%d\n", blocksize);
+		} else {
+			sendstringf("INF: Not a pagefault\n");
 
+			if (isAMD) {
+				if (AMD_hasNRIPS) {
+					getcpuinfo()->vmcb->RIP = getcpuinfo()->vmcb->nRIP;
+				} else {
+					getcpuinfo()->vmcb->RIP += 3;
+				}
+			} else {
+				vmwrite(vm_guest_rip, vmread(vm_guest_rip) + vmread(vm_exit_instructionlength));
+			}
 
-  if (error)
-  {
-    sendstringf("Error during map (%d)\n", error);
-    if (error==2)
-    {
-      sendstringf("Pagefault at address %x\n", pagefaultaddress);
-      blocksize=pagefaultaddress-destinationaddress;
-      sendstringf("blocksize=%d\n", blocksize);
-    }
-    else
-    {
-      sendstringf("Not a pagefault\n");
-      if (isAMD)
-      {
-        if (AMD_hasNRIPS)
-          getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-        else
-          getcpuinfo()->vmcb->RIP+=3;
-      }
-      else
-        vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
-      *errorcode=0x1000+error; //map error
-      csLeave(&CloakedPagesCS);
-      return VM_OK;
-    }
-  }
+			*errorcode = 0x1000 + error; //map error
+			csLeave(&CloakedPagesCS);
+			return VM_OK;
+		}
+	}
 
+	if (blocksize) {
+		//sendstringf("Copying to destination\n");
+		copymem(destination, source, blocksize);
+		unmapVMmemory(destination, blocksize);
 
+		*offset = (*offset) + blocksize;
+	}
 
-  if (blocksize)
-  {
-    //sendstringf("Copying to destination\n");
-    copymem(destination, source, blocksize);
-    unmapVMmemory(destination, blocksize);
+	if (error == 2) {
+		sendstringf("INF: Raising the pagefault\n");
+		csLeave(&CloakedPagesCS);
+		return raisePagefault(getcpuinfo(), pagefaultaddress);
+	}
 
-    *offset=(*offset)+blocksize;
-  }
+	if ((*offset) >= sizeneeded) {
+		//once all data has been copied
+		sendstringf("INF: All data has been copied\n");
+		*resultSize = *offset;
 
-  if (error==2)
-  {
-    sendstringf("Raising the pagefault\n");
-    csLeave(&CloakedPagesCS);
-    return raisePagefault(getcpuinfo(), pagefaultaddress);
-  }
+		// sendstringf("Going to the next instruction\n");
+		if (isAMD) {
+			if (AMD_hasNRIPS) {
+				getcpuinfo()->vmcb->RIP = getcpuinfo()->vmcb->nRIP;
+			} else {
+				getcpuinfo()->vmcb->RIP += 3;
+			}
+		} else {
+			vmwrite(vm_guest_rip, vmread(vm_guest_rip) + vmread(vm_exit_instructionlength));
+		}
 
+		*errorcode = 0;
+	} else {
+		sendstringf("INF: not everything copied yet. Rerun\n");
+	}
 
-  if ((*offset)>=sizeneeded)
-  {
-    //once all data has been copied
-    sendstringf("All data has been copied\n");
-    *resultSize=*offset;
-
-   // sendstringf("Going to the next instruction\n");
-    if (isAMD)
-    {
-      if (AMD_hasNRIPS)
-        getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-      else
-        getcpuinfo()->vmcb->RIP+=3;
-    }
-    else
-      vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
-
-    *errorcode=0;
-  }
-  else
-  {
-    sendstringf("not everything copied yet. Rerun\n");
-
-  }
-
-  csLeave(&CloakedPagesCS);
-  return VM_OK;
+	csLeave(&CloakedPagesCS);
+	return VM_OK;
 }
 
-VMSTATUS ept_watch_retrievelog(int ID, QWORD results, DWORD *resultSize, DWORD *offset, QWORD *errorcode)
-/*
- * Retrieves the collected log
- * offset is the offset from what point the log should continue copying (works like a rep xxx instruction)
- */
-{
-  if (ID>=eptWatchListPos) //out of range
-  {
-    sendstringf("Invalid ID\n");
+VMSTATUS ept_watch_retrievelog(int ID, QWORD results, DWORD *resultSize, DWORD *offset, QWORD *errorcode) {
+	/*
+	 * Retrieves the collected log
+	 * offset is the offset from what point the log should continue copying (works like a rep xxx instruction)
+	 */
+	if (ID >= eptWatchListPos) { //out of range
+		sendstringf("INF: Invalid ID\n");
 
+		if (isAMD) {
+			if (AMD_hasNRIPS) {
+				getcpuinfo()->vmcb->RIP = getcpuinfo()->vmcb->nRIP;
+			} else {
+				getcpuinfo()->vmcb->RIP += 3;
+			}
+		} else {
+			vmwrite(vm_guest_rip, vmread(vm_guest_rip) + vmread(vm_exit_instructionlength));
+		}
 
-    if (isAMD)
-    {
-      if (AMD_hasNRIPS)
-        getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-      else
-        getcpuinfo()->vmcb->RIP+=3;
-    }
-    else
-      vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
+		*errorcode = 1; //invalid ID
+		return VM_OK;
+	}
 
-    *errorcode=1; //invalid ID
-    return VM_OK;
-  }
+	csEnter(&eptWatchListCS);
+	if (eptWatchList[ID].Active == 0) { //not active
+		sendstringf("INF: Inactive ID\n");
 
-  csEnter(&eptWatchListCS);
+		if (isAMD) {
+			if (AMD_hasNRIPS) {
+				getcpuinfo()->vmcb->RIP = getcpuinfo()->vmcb->nRIP;
+			} else {
+				getcpuinfo()->vmcb->RIP += 3;
+			}
+		} else {
+			vmwrite(vm_guest_rip, vmread(vm_guest_rip) + vmread(vm_exit_instructionlength));
+		}
 
-  if (eptWatchList[ID].Active==0) //not active
-  {
-    sendstringf("Inactive ID\n");
-    if (isAMD)
-    {
-      if (AMD_hasNRIPS)
-        getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-      else
-        getcpuinfo()->vmcb->RIP+=3;
-    }
-    else
-      vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
-    *errorcode=3; //inactive ID
+		*errorcode = 3; //inactive ID
+		csLeave(&eptWatchListCS);
+		return VM_OK;
+	}
 
-    csLeave(&eptWatchListCS);
-    return VM_OK;
-  }
+	// int entrysize=0;
+	DWORD sizeneeded = sizeof(PageEventListDescriptor);
+	int maxid = eptWatchList[ID].Log->numberOfEntries;
 
+	switch (eptWatchList[ID].Log->entryType) {
+		case 0:
+			{
+				sizeneeded += (QWORD)(&eptWatchList[ID].Log->pe.basic[maxid]) - (QWORD)(&eptWatchList[ID].Log->pe.basic[0]);
+				break;
+			}
+		case 1:
+			{
+				sizeneeded += (QWORD)(&eptWatchList[ID].Log->pe.extended[maxid]) - (QWORD)(&eptWatchList[ID].Log->pe.extended[0]);
+				break;
+			}
+		case 2:
+			{
+				sizeneeded += (QWORD)(&eptWatchList[ID].Log->pe.basics[maxid]) - (QWORD)(&eptWatchList[ID].Log->pe.basics[0]);
+				break;
+			}
+		case 3:
+			{
+				sizeneeded += (QWORD)(&eptWatchList[ID].Log->pe.extendeds[maxid]) - (QWORD)(&eptWatchList[ID].Log->pe.extendeds[0]);
+				break;
+			}
+	}
 
- // int entrysize=0;
-  DWORD sizeneeded=sizeof(PageEventListDescriptor);
-  int maxid=eptWatchList[ID].Log->numberOfEntries;
+	if ((*resultSize) < sizeneeded) {
+		sendstringf("INF: Too small\n");
+		*resultSize = sizeneeded;
 
-  switch (eptWatchList[ID].Log->entryType)
-  {
-    case 0:
-      sizeneeded+=(QWORD)(&eptWatchList[ID].Log->pe.basic[maxid])-(QWORD)(&eptWatchList[ID].Log->pe.basic[0]);
-      break;
+		if (isAMD) {
+			if (AMD_hasNRIPS) {
+				getcpuinfo()->vmcb->RIP = getcpuinfo()->vmcb->nRIP;
+			} else {
+				getcpuinfo()->vmcb->RIP += 3;
+			}
+		} else {
+			vmwrite(vm_guest_rip, vmread(vm_guest_rip) + vmread(vm_exit_instructionlength));
+		}
 
-    case 1:
-      sizeneeded+=(QWORD)(&eptWatchList[ID].Log->pe.extended[maxid])-(QWORD)(&eptWatchList[ID].Log->pe.extended[0]);
-      break;
+		*errorcode = 2; //invalid size
+		csLeave(&eptWatchListCS);
+		return VM_OK;
+	}
 
-    case 2:
-      sizeneeded+=(QWORD)(&eptWatchList[ID].Log->pe.basics[maxid])-(QWORD)(&eptWatchList[ID].Log->pe.basics[0]);
-      break;
+	if (results == 0) {
+		sendstringf("INF: results==0\n");
 
-    case 3:
-      sizeneeded+=(QWORD)(&eptWatchList[ID].Log->pe.extendeds[maxid])-(QWORD)(&eptWatchList[ID].Log->pe.extendeds[0]);
-      break;
-  }
+		if (isAMD) {
+			if (AMD_hasNRIPS) {
+				getcpuinfo()->vmcb->RIP = getcpuinfo()->vmcb->nRIP;
+			} else {
+				getcpuinfo()->vmcb->RIP += 3;
+			}
+		} else {
+			vmwrite(vm_guest_rip, vmread(vm_guest_rip) + vmread(vm_exit_instructionlength));
+		}
 
-  if ((*resultSize) < sizeneeded)
-  {
-    sendstringf("Too small\n");
-    *resultSize=sizeneeded;
-    if (isAMD)
-    {
-      if (AMD_hasNRIPS)
-        getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-      else
-        getcpuinfo()->vmcb->RIP+=3;
-    }
-    else
-      vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
-    *errorcode=2; //invalid size
-    csLeave(&eptWatchListCS);
-    return VM_OK;
-  }
-
-
-
-  if (results==0)
-  {
-    sendstringf("results==0\n");
-    if (isAMD)
-    {
-      if (AMD_hasNRIPS)
-        getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-      else
-        getcpuinfo()->vmcb->RIP+=3;
-    }
-    else
-      vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
-    *errorcode=4; //results==0
-    csLeave(&eptWatchListCS);
-    return VM_OK;
-  }
+		*errorcode = 4; //results==0
+		csLeave(&eptWatchListCS);
+		return VM_OK;
+	}
 
 #ifdef MEMORYCHECKNOLOGRETRIEVAL
-  //skip
-  if (isAMD)
-  {
-    if (AMD_hasNRIPS)
-      getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-    else
-      getcpuinfo()->vmcb->RIP+=3;
-  }
-  else
-    vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
-  *resultSize=0;
-  *errorcode=0; //results==0
-  csLeave(&eptWatchListCS);
-  return VM_OK;
+	//skip
+	if (isAMD) {
+		if (AMD_hasNRIPS) {
+			getcpuinfo()->vmcb->RIP = getcpuinfo()->vmcb->nRIP;
+		} else {
+			getcpuinfo()->vmcb->RIP += 3;
+		}
+	} else {
+		vmwrite(vm_guest_rip, vmread(vm_guest_rip) + vmread(vm_exit_instructionlength));
+	}
+
+	*resultSize = 0;
+	*errorcode = 0; //results==0
+	csLeave(&eptWatchListCS);
+	return VM_OK;
 #endif
 
-  if ((*offset) && (eptWatchList[ID].CopyInProgress==0))
-  {
-    if (isAMD)
-    {
-      if (AMD_hasNRIPS)
-        getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-      else
-        getcpuinfo()->vmcb->RIP+=3;
-    }
-    else
-      vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
-    *errorcode=5; //offset set but not copyinprogress
-    csLeave(&eptWatchListCS);
-    return VM_OK;
-  }
+	if ((*offset) && (eptWatchList[ID].CopyInProgress == 0)) {
+		if (isAMD) {
+			if (AMD_hasNRIPS) {
+				getcpuinfo()->vmcb->RIP = getcpuinfo()->vmcb->nRIP;
+			} else {
+				getcpuinfo()->vmcb->RIP += 3;
+			}
+		} else {
+			vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
+		}
 
-  if ((*offset)>sizeneeded)
-  {
-    if (isAMD)
-    {
-      if (AMD_hasNRIPS)
-        getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-      else
-        getcpuinfo()->vmcb->RIP+=3;
-    }
-    else
-      vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
-    *errorcode=6; //offset is too high
-    csLeave(&eptWatchListCS);
-    return VM_OK;
-  }
+		*errorcode = 5; //offset set but not copyinprogress
+		csLeave(&eptWatchListCS);
+		return VM_OK;
+	}
 
+	if ((*offset) > sizeneeded) {
+		if (isAMD) {
+			if (AMD_hasNRIPS) {
+				getcpuinfo()->vmcb->RIP = getcpuinfo()->vmcb->nRIP;
+			} else {
+				getcpuinfo()->vmcb->RIP += 3;
+			}
+		} else {
+			vmwrite(vm_guest_rip, vmread(vm_guest_rip) + vmread(vm_exit_instructionlength));
+		}
 
+		*errorcode = 6; //offset is too high
+		csLeave(&eptWatchListCS);
+		return VM_OK;
+	}
 
-  int sizeleft=sizeneeded-(*offset); //decrease bytes left by bytes already copied
+	int sizeleft = sizeneeded - (*offset); //decrease bytes left by bytes already copied
 
- // sendstringf("*offset=%d\n", *offset);
-  //sendstringf("sizeleft=%d\n", sizeleft);
-  eptWatchList[ID].CopyInProgress=1;
+	// sendstringf("*offset=%d\n", *offset);
+	//sendstringf("sizeleft=%d\n", sizeleft);
+	eptWatchList[ID].CopyInProgress = 1;
 
-  int error;
-  QWORD pagefaultaddress;
-  QWORD destinationaddress=results+(*offset);
-  int blocksize=sizeleft;
-  if (blocksize>16*4096)
-    blocksize=16*4096;
+	int error = 0;
+	QWORD pagefaultaddress = 0;
+	QWORD destinationaddress = results + (*offset);
+	int blocksize = sizeleft;
 
-  //sendstringf("destinationaddress=%6\n", destinationaddress);
+	if (blocksize > 16 * 4096) {
+		blocksize = 16 * 4096;
+	}
 
-  unsigned char *source=(unsigned char *)(((QWORD)eptWatchList[ID].Log)+(*offset));
-  unsigned char *destination=mapVMmemoryEx(NULL, destinationaddress, blocksize, &error, &pagefaultaddress,1);
+	//sendstringf("destinationaddress=%6\n", destinationaddress);
+	unsigned char *source = (unsigned char*)(((QWORD)eptWatchList[ID].Log) + (*offset));
+	unsigned char *destination = mapVMmemoryEx(NULL, destinationaddress, blocksize, &error, &pagefaultaddress, 1);
 
+	if (error) {
+		sendstringf("INF: Error during map (%d)\n", error);
 
-  if (error)
-  {
-    sendstringf("Error during map (%d)\n", error);
-    if (error==2)
-    {
-      sendstringf("Pagefault at address %x\n", pagefaultaddress);
-      blocksize=pagefaultaddress-destinationaddress;
-      sendstringf("blocksize=%d\n", blocksize);
-    }
-    else
-    {
-      sendstringf("Not a pagefault\n");
-      if (isAMD)
-      {
-        if (AMD_hasNRIPS)
-          getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-        else
-          getcpuinfo()->vmcb->RIP+=3;
-      }
-      else
-        vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
-      *errorcode=0x1000+error; //map error
-      csLeave(&eptWatchListCS);
-      return VM_OK;
-    }
-  }
+		if (error == 2) {
+			sendstringf("INF: Pagefault at address %x\n", pagefaultaddress);
+			blocksize = pagefaultaddress - destinationaddress;
+			sendstringf("INF: blocksize=%d\n", blocksize);
+		} else {
+			sendstringf("INF: Not a pagefault\n");
 
+			if (isAMD) {
+				if (AMD_hasNRIPS) {
+					getcpuinfo()->vmcb->RIP = getcpuinfo()->vmcb->nRIP;
+				} else {
+					getcpuinfo()->vmcb->RIP += 3;
+				}
+			} else {
+				vmwrite(vm_guest_rip, vmread(vm_guest_rip) + vmread(vm_exit_instructionlength));
+			}
 
+			*errorcode = 0x1000 + error; //map error
+			csLeave(&eptWatchListCS);
+			return VM_OK;
+		}
+	}
 
-  if (blocksize)
-  {
-    //sendstringf("Copying to destination\n");
-    copymem(destination, source, blocksize);
-    unmapVMmemory(destination, blocksize);
+	if (blocksize) {
+		//sendstringf("Copying to destination\n");
+		copymem(destination, source, blocksize);
+		unmapVMmemory(destination, blocksize);
 #ifdef MEMORYCHECK
-    //mark log as 0xce
-    QWORD a,b;
+		//mark log as 0xce
+		QWORD b = (QWORD)eptWatchList[ID].Log+sizeof(PageEventListDescriptor);
 
-    b=(QWORD)eptWatchList[ID].Log+sizeof(PageEventListDescriptor);
-    int x;
-    for (x=0; x<blocksize; x++)
-    {
-      a=(QWORD)source+x;
-      if (a>=b)
-        source[x]=0xce;
-    }
+		for (int x = 0; x < blocksize; x++) {
+			QWORD a = (QWORD)source + x;
+			if (a >= b) {
+				source[x] = 0xce;
+			}
+		}
 #endif
+		*offset = (*offset) + blocksize;
+	}
 
+	if (error == 2) {
+		sendstringf("INF: Raising the pagefault\n");
+		csLeave(&eptWatchListCS);
+		return raisePagefault(getcpuinfo(), pagefaultaddress);
+	}
 
+	//sendstringf("new *offset=%d", *offset);
+	//sendstringf("sizeneeded=%d", sizeneeded);
 
-    *offset=(*offset)+blocksize;
-  }
+	if ((*offset) >= sizeneeded) {
+		//once all data has been copied
+		// sendstringf("All data has been copied\n");
+		eptWatchList[ID].Log->numberOfEntries = 0;
+		eptWatchList[ID].CopyInProgress = 0;
 
-  if (error==2)
-  {
-    sendstringf("Raising the pagefault\n");
-    csLeave(&eptWatchListCS);
-    return raisePagefault(getcpuinfo(), pagefaultaddress);
-  }
+		*resultSize = *offset;
 
- //sendstringf("new *offset=%d", *offset);
-  //sendstringf("sizeneeded=%d", sizeneeded);
+		// sendstringf("Going to the next instruction\n");
+		if (isAMD) {
+			if (AMD_hasNRIPS) {
+				getcpuinfo()->vmcb->RIP = getcpuinfo()->vmcb->nRIP;
+			} else {
+				getcpuinfo()->vmcb->RIP += 3;
+			}
+		} else {
+			vmwrite(vm_guest_rip, vmread(vm_guest_rip) + vmread(vm_exit_instructionlength));
+		}
 
-  if ((*offset)>=sizeneeded)
-  {
-    //once all data has been copied
-   // sendstringf("All data has been copied\n");
-    eptWatchList[ID].Log->numberOfEntries=0;
-    eptWatchList[ID].CopyInProgress=0;
+		*errorcode = 0;
+	} else {
+		//sendstringf("not everything copied yet. Rerun\n");
+	}
 
-    *resultSize=*offset;
-
-   // sendstringf("Going to the next instruction\n");
-    if (isAMD)
-    {
-      if (AMD_hasNRIPS)
-        getcpuinfo()->vmcb->RIP=getcpuinfo()->vmcb->nRIP;
-      else
-        getcpuinfo()->vmcb->RIP+=3;
-    }
-    else
-      vmwrite(vm_guest_rip,vmread(vm_guest_rip)+vmread(vm_exit_instructionlength));
-    *errorcode=0;
-  }
-  else
-  {
-    //sendstringf("not everything copied yet. Rerun\n");
-
-  }
-
-  csLeave(&eptWatchListCS);
-  return VM_OK;
+	csLeave(&eptWatchListCS);
+	return VM_OK;
 }
 
 
-int ept_watch_activate(QWORD PhysicalAddress, int Size, int Type, DWORD Options, int MaxEntryCount, int *outID, QWORD OptionalField1, QWORD OptionalField2)
-{
-  int result=0;
-  sendstringf("+ ept_watch_activate(%6, %d, %d, %x, %d, %6, %6,%6)\n", PhysicalAddress, Size, Options, MaxEntryCount, outID, OptionalField1, OptionalField2);
-// ept_watch_activate(00000004030190d8, 8, 1, 20, 8390248, 0000000000000000, 0000000000000000,0000008000800668)
+int ept_watch_activate(QWORD PhysicalAddress, int Size, int Type, DWORD Options, int MaxEntryCount, int *outID, QWORD OptionalField1, QWORD OptionalField2) {
+	int result = 0;
+	sendstringf("INF: + ept_watch_activate(%6, %d, %d, %x, %d, %6, %6,%6)\n", PhysicalAddress, Size, Options, MaxEntryCount, outID, OptionalField1, OptionalField2);
+	// ept_watch_activate(00000004030190d8, 8, 1, 20, 8390248, 0000000000000000, 0000000000000000,0000008000800668)
 
-  if ((MaxEntryCount==0) && (((EPTO_INTERRUPT|EPTO_DBVMBP) & Options)==0) )
-  {
-    sendstringf("MaxEntryCount=0\n");
-    return 1;
-  }
-  else
-    sendstringf("MaxEntryCount=%d (this is ok)\n", MaxEntryCount);
+	if ((MaxEntryCount == 0) && (((EPTO_INTERRUPT|EPTO_DBVMBP) & Options) == 0)) {
+		sendstringf("INF: MaxEntryCount=0\n");
+		return 1;
+	} else {
+		sendstringf("INF: MaxEntryCount=%d (this is ok)\n", MaxEntryCount);
+	}
 
-  csEnter(&eptWatchListCS);
+	csEnter(&eptWatchListCS);
 
-  int ID=getFreeWatchID();
-  int structtype=(Options >> 2) & 3;
-  int structsize;
+	int ID = getFreeWatchID();
+	int structtype = (Options >> 2) & 3;
+	int structsize = 0;
 
+	sendstringf("INF: getFreeWatchID() returned %d .  eptWatchListPos=%d\n", ID, eptWatchListPos);
+	switch (structtype) {
+		case 0: structsize = sizeof(PageEventBasic); break;             //EPTO_SAVE_XSAVE=0 and EPTO_SAVE_STACK=0
+		case 1: structsize = sizeof(PageEventExtended); break;          //EPTO_SAVE_XSAVE=1 and EPTO_SAVE_STACK=0
+		case 2: structsize = sizeof(PageEventBasicWithStack); break;    //EPTO_SAVE_XSAVE=0 and EPTO_SAVE_STACK=1
+		case 3: structsize = sizeof(PageEventExtendedWithStack); break; //EPTO_SAVE_XSAVE=1 and EPTO_SAVE_STACK=1
+	}
 
+	//make sure it doesn't pass a page boundary
+	//todo: recursively spawn more watches if needed
+	if (((PhysicalAddress + Size) & 0xfffffffffffff000ULL) > (PhysicalAddress & 0xfffffffffffff000ULL)) {
+		eptWatchList[ID].Size = 0x1000 - (PhysicalAddress & 0xfff);
+	} else {
+		eptWatchList[ID].Size = Size;
+	}
 
-  sendstringf("getFreeWatchID() returned %d .  eptWatchListPos=%d\n", ID, eptWatchListPos);
-  switch (structtype)
-  {
-    case 0: structsize=sizeof(PageEventBasic); break;             //EPTO_SAVE_XSAVE=0 and EPTO_SAVE_STACK=0
-    case 1: structsize=sizeof(PageEventExtended); break;          //EPTO_SAVE_XSAVE=1 and EPTO_SAVE_STACK=0
-    case 2: structsize=sizeof(PageEventBasicWithStack); break;    //EPTO_SAVE_XSAVE=0 and EPTO_SAVE_STACK=1
-    case 3: structsize=sizeof(PageEventExtendedWithStack); break; //EPTO_SAVE_XSAVE=1 and EPTO_SAVE_STACK=1
-  }
+	eptWatchList[ID].PhysicalAddress = PhysicalAddress;
+	eptWatchList[ID].Type = Type;
 
-  //make sure it doesn't pass a page boundary
-  //todo: recursively spawn more watches if needed
+	if (Options & EPTO_DBVMBP) {
+		eptWatchList[ID].LoopUserMode = OptionalField1;
+		eptWatchList[ID].LoopKernelMode = OptionalField2;
+	}
 
-  if (((PhysicalAddress+Size) & 0xfffffffffffff000ULL) > (PhysicalAddress & 0xfffffffffffff000ULL))
-    eptWatchList[ID].Size=0x1000-(PhysicalAddress & 0xfff);
-  else
-    eptWatchList[ID].Size=Size;
+	eptWatchList[ID].Log = malloc(sizeof(PageEventListDescriptor) * 2 + structsize * MaxEntryCount); //*2 because i'm not sure how the alignment of the final entry goes
+	zeromemory(eptWatchList[ID].Log, sizeof(PageEventListDescriptor) * 2 + structsize * MaxEntryCount);
 
-  eptWatchList[ID].PhysicalAddress=PhysicalAddress;
-  eptWatchList[ID].Type=Type;
-  if (Options & EPTO_DBVMBP)
-  {
-    eptWatchList[ID].LoopUserMode=OptionalField1;
-    eptWatchList[ID].LoopKernelMode=OptionalField2;
-  }
+	eptWatchList[ID].Log->ID = ID;
+	eptWatchList[ID].Log->entryType = structtype;
+	eptWatchList[ID].Log->numberOfEntries = 0;
+	eptWatchList[ID].Log->maxNumberOfEntries = MaxEntryCount;
+	eptWatchList[ID].Log->missedEntries = 0;
+	eptWatchList[ID].Options = Options;
+	eptWatchList[ID].Active = 1;
 
+	sendstringf("INF: Configured ept watch. Activating ID %d\n", ID);
 
-  eptWatchList[ID].Log=malloc(sizeof(PageEventListDescriptor)*2+structsize*MaxEntryCount); //*2 because i'm not sure how the alignment of the final entry goes
-  zeromemory(eptWatchList[ID].Log, sizeof(PageEventListDescriptor)*2+structsize*MaxEntryCount);
+	//for each CPU mark this page as non writable/readable
+	pcpuinfo currentcpuinfo = getcpuinfo();
+	pcpuinfo c = firstcpuinfo;
 
-
-  eptWatchList[ID].Log->ID=ID;
-  eptWatchList[ID].Log->entryType=structtype;
-  eptWatchList[ID].Log->numberOfEntries=0;
-  eptWatchList[ID].Log->maxNumberOfEntries=MaxEntryCount;
-  eptWatchList[ID].Log->missedEntries=0;
-
-  eptWatchList[ID].Options=Options;
-  sendstringf("Configured ept watch. Activating ID %d\n", ID);
-
-  eptWatchList[ID].Active=1;
-
-  //for each CPU mark this page as non writable/readable
-  pcpuinfo currentcpuinfo=getcpuinfo();
-  pcpuinfo c=firstcpuinfo;
-  while (c)
-  {
-    QWORD PA_PTE;
-
-    sendstringf("Setting watch for CPU %d\n", c->cpunr);
-
-    csEnter(&c->EPTPML4CS);
+	while (c) {
+		QWORD PA_PTE = 0;
+		sendstringf("INF: Setting watch for CPU %d\n", c->cpunr);
+		csEnter(&c->EPTPML4CS);
 
 #ifdef USENMIFORWAIT
-    if ((canExitOnNMI) && (c!=currentcpuinfo))
-    {
-      c->WaitingTillDone=0;
-      c->WaitTillDone=1;
-      apic_sendWaitInterrupt(c->apicid-1);
-      while (c->WaitingTillDone==0) _pause();
-    }
+		if ((canExitOnNMI) && (c != currentcpuinfo)) {
+			c->WaitingTillDone = 0;
+			c->WaitTillDone = 1;
+			apic_sendWaitInterrupt(c->apicid - 1);
+
+			while (c->WaitingTillDone == 0) {
+				_pause();
+			}
+		}
 #endif
+		if (isAMD) {
+			PA_PTE = NPMapPhysicalMemory(c, PhysicalAddress, 1);
+			sendstringf("INF: PA_PTE=%6\n", PA_PTE);
+		} else {
+			PA_PTE=EPTMapPhysicalMemory(c, PhysicalAddress, 1);
+		}
 
+		if (c->eptWatchListLength<eptWatchListSize) { //realloc
+			c->eptWatchList = realloc(c->eptWatchList, eptWatchListSize * sizeof(EPT_PTE));
+		}
 
-    if (isAMD)
-    {
-      PA_PTE=NPMapPhysicalMemory(c, PhysicalAddress, 1);
-      sendstringf("PA_PTE=%6\n", PA_PTE);
-    }
-    else
-      PA_PTE=EPTMapPhysicalMemory(c, PhysicalAddress, 1);
+		c->eptWatchList[ID] = mapPhysicalMemoryGlobal(PA_PTE, sizeof(EPT_PTE)); //can use global as it's not a quick map/unmap procedure
+		if (isAMD) {
+			//AMD NP
+			_PTE_PAE temp = *(_PTE_PAE*)c->eptWatchList[ID];
+			sendstringf("INF: Old page value was %6\n", *(QWORD*)c->eptWatchList[ID]);
 
+			if (Type == EPTW_WRITE) {
+				temp.RW = 0;
+			} else if (Type == EPTW_READWRITE) {
+				temp.P = 0; //not present, ANY access, including execute
+			} else if (Type == EPTW_EXECUTE) {
+				temp.EXB = 1; //no execute flag
+			}
 
-    if (c->eptWatchListLength<eptWatchListSize) //realloc
-      c->eptWatchList=realloc(c->eptWatchList, eptWatchListSize*sizeof(EPT_PTE));
+			*(c->eptWatchList[ID]) = *(EPT_PTE*)&temp;
+			sendstringf("INF: New page value is %6\n", *(QWORD*)c->eptWatchList[ID]);
+		} else {
+			//Intel EPT
+			EPT_PTE temp = *(c->eptWatchList[ID]); //using temp in case the cpu doesn't support a XA of 1 with an RA of 0
 
-    c->eptWatchList[ID]=mapPhysicalMemoryGlobal(PA_PTE, sizeof(EPT_PTE)); //can use global as it's not a quick map/unmap procedure
+			if (Type == EPTW_WRITE) { //Writes
+				temp.WA = 0;
+			} else if (Type == EPTW_READWRITE) { //read and writes
+				if (has_EPT_ExecuteOnlySupport) {
+					temp.XA = 1;
+				} else {
+					temp.XA = 0;
+				}
+				temp.WA = 0;
+				temp.RA = 0;
+			}
+			if (Type == EPTW_EXECUTE) { //executes
+				temp.XA = 0;
+			}
 
+			*(c->eptWatchList[ID]) = temp;
+		}
 
-
-    if (isAMD)
-    {
-      //AMD NP
-      _PTE_PAE temp=*(_PTE_PAE *)c->eptWatchList[ID];
-      sendstringf("Old page value was %6\n", *(QWORD *)c->eptWatchList[ID]);
-
-      if (Type==EPTW_WRITE)
-      {
-        temp.RW=0;
-      }
-      else
-      if (Type==EPTW_READWRITE)
-      {
-        temp.P=0; //not present, ANY access, including execute
-      }
-      else
-      if (Type==EPTW_EXECUTE)
-      {
-        temp.EXB=1; //no execute flag
-      }
-      *(c->eptWatchList[ID])=*(EPT_PTE *)&temp;
-      sendstringf("New page value is %6\n", *(QWORD *)c->eptWatchList[ID]);
-    }
-    else
-    {
-
-      //Intel EPT
-      EPT_PTE temp=*(c->eptWatchList[ID]); //using temp in case the cpu doesn't support a XA of 1 with an RA of 0
-
-      if (Type==EPTW_WRITE) //Writes
-        temp.WA=0;
-      else
-      if (Type==EPTW_READWRITE) //read and writes
-      {
-        if (has_EPT_ExecuteOnlySupport)
-          temp.XA=1;
-        else
-          temp.XA=0;
-        temp.WA=0;
-        temp.RA=0;
-      }
-
-      if (Type==EPTW_EXECUTE) //executes
-      {
-        temp.XA=0;
-      }
-      *(c->eptWatchList[ID])=temp;
-
-    }
-
-    _wbinvd();
-    c->eptUpdated=1;
+		_wbinvd();
+		c->eptUpdated = 1;
 
 #ifdef USENMIFORWAIT
-    if (canExitOnNMI && (c!=currentcpuinfo))
-      c->WaitTillDone=0;
+		if (canExitOnNMI && (c!=currentcpuinfo)) {
+			c->WaitTillDone = 0;
+		}
 #endif
+		csLeave(&c->EPTPML4CS);
+		c = c->next;
+	}
 
-    csLeave(&c->EPTPML4CS);
+	//test if needed:  SetPageToWriteThrough(currentcpuinfo->eptwatchlist[ID].EPTEntry);
+	//check out 28.3.3.4  (might not be needed due to vmexit, but do check anyhow)
+	//yes, is needed
+	//EPTINV
 
-    c=c->next;
-  }
+	//everything ok, return success:
+	sendstringf("INF: Passing ID(%d) to the caller\n", ID);
+	*outID = ID;
 
-  //test if needed:  SetPageToWriteThrough(currentcpuinfo->eptwatchlist[ID].EPTEntry);
-  //check out 28.3.3.4  (might not be needed due to vmexit, but do check anyhow)
-  //yes, is needed
-  //EPTINV
+	csLeave(&eptWatchListCS);
 
+	sendstringf("INF: Invalidating pages\n");
+	ept_invalidate();
 
-
-  //everything ok, return success:
-
-  sendstringf("Passing ID(%d) to the caller\n", ID);
-  *outID=ID;
-
-
-  csLeave(&eptWatchListCS);
-
-  sendstringf("Invalidating pages\n");
-  ept_invalidate();
-
-  return result;
+	return result;
 }
 
-int ept_watch_deactivate(int ID)
-/*
- * disable a watch
- * It's possible that a watch event is triggered between now and the end of this function.
- * That will result in a ept_violation event, which causes it to not see that there is a watch event for this
- * As a result, that DBVM thread will try to map the physical address , and if it's already mapped, set it to full access
- * In short: it's gonna be ok
- */
-{
-  int i;
-  int hasAnotherOne=0;
-  sendstringf("ept_watch_deactivate(%d)", ID);
+int ept_watch_deactivate(int ID) {
+	/*
+	 * disable a watch
+	 * It's possible that a watch event is triggered between now and the end of this function.
+	 * That will result in a ept_violation event, which causes it to not see that there is a watch event for this
+	 * As a result, that DBVM thread will try to map the physical address , and if it's already mapped, set it to full access
+	 * In short: it's gonna be ok
+	 */
+	int i = 0;
+	int hasAnotherOne = 0;
 
-  getcpuinfo()->LastVMCallDebugPos=1;
+	sendstringf("INF: ept_watch_deactivate(%d)", ID);
+	getcpuinfo()->LastVMCallDebugPos = 1;
+	csEnter(&eptWatchListCS);
 
-  csEnter(&eptWatchListCS);
+	if (ID >= eptWatchListPos)   {
+		getcpuinfo()->LastVMCallDebugPos = 2;
+		sendstringf("  Invalid entry\n");
+		csLeave(&eptWatchListCS);
+		return 1;
+	}
 
+	getcpuinfo()->LastVMCallDebugPos = 3;
 
+	if (eptWatchList[ID].Active == 0) {
+		getcpuinfo()->LastVMCallDebugPos = 4;
+		sendstringf("  Inactive entry\n");
+		csLeave(&eptWatchListCS);
+		return 2;
+	}
 
-  if (ID>=eptWatchListPos)
-  {
-    getcpuinfo()->LastVMCallDebugPos=2;
-    sendstringf("  Invalid entry\n");
-    csLeave(&eptWatchListCS);
-    return 1;
-  }
+	getcpuinfo()->LastVMCallDebugPos = 5;
+	QWORD PhysicalBase = eptWatchList[ID].PhysicalAddress & 0xfffffffffffff000ULL;
 
-  getcpuinfo()->LastVMCallDebugPos=3;
+	for (i = 0; i < eptWatchListPos; i++) {
+		if ((i != ID) && ept_isWatchIDMatch(PhysicalBase, i)) {
+			//matches
+			if (eptWatchList[i].Type==eptWatchList[ID].Type) { //don't undo
+				hasAnotherOne = 1;
+			}
+		}
+	}
 
-  if (eptWatchList[ID].Active==0)
-  {
-    getcpuinfo()->LastVMCallDebugPos=4;
-    sendstringf("  Inactive entry\n");
-    csLeave(&eptWatchListCS);
-    return 2;
-  }
+	getcpuinfo()->LastVMCallDebugPos = 6;
 
-  getcpuinfo()->LastVMCallDebugPos=5;
+	if (hasAnotherOne == 0) {
+		pcpuinfo c = firstcpuinfo;
+		pcpuinfo currentcpuinfo = getcpuinfo();
 
-  QWORD PhysicalBase=eptWatchList[ID].PhysicalAddress & 0xfffffffffffff000ULL;
-
-  for (i=0; i<eptWatchListPos; i++)
-  {
-    if ((i!=ID) && ept_isWatchIDMatch(PhysicalBase, i))
-    {
-      //matches
-      if (eptWatchList[i].Type==eptWatchList[ID].Type) //don't undo
-        hasAnotherOne=1;
-    }
-  }
-
-  getcpuinfo()->LastVMCallDebugPos=6;
-
-  if (hasAnotherOne==0)
-  {
-    pcpuinfo c=firstcpuinfo;
-    pcpuinfo currentcpuinfo=getcpuinfo();
-
-
-    while (c)
-    {
-      //undo
-      csEnter(&c->EPTPML4CS);
+		while (c) {
+			//undo
+			csEnter(&c->EPTPML4CS);
 #ifdef USENMIFORWAIT
-      if (canExitOnNMI && (c!=currentcpuinfo))
-      {
-        c->WaitingTillDone=0;
-        c->WaitTillDone=1;
-        apic_sendWaitInterrupt(c->apicid-1);
-        while (c->WaitingTillDone==0) _pause();
-      }
+			if (canExitOnNMI && (c != currentcpuinfo)) {
+				c->WaitingTillDone = 0;
+				c->WaitTillDone = 1;
+				apic_sendWaitInterrupt(c->apicid - 1);
+
+				while (c->WaitingTillDone == 0) {
+					_pause();
+				}
+			}
 #endif
+			if ((c->eptWatchList) && (ID<c->eptWatchListLength) && (c->eptWatchList[ID])) {
+				if (isAMD) {
+					_PTE_PAE temp = *(PPTE_PAE)(c->eptWatchList[ID]);
+					if (eptWatchList[ID].Type == EPTW_WRITE) {
+						temp.RW = 1; //back to writable
+					} else if (eptWatchList[ID].Type == EPTW_READWRITE) {
+						temp.P = 1;
+						temp.RW = 1;
+						temp.EXB = 0;
+					} else {
+						temp.EXB = 0;
+					}
 
+					*(PPTE_PAE)(c->eptWatchList[ID]) = temp;
+				} else {
+					EPT_PTE temp = *(c->eptWatchList[ID]);
 
+					if (eptWatchList[ID].Type == EPTW_WRITE) {
+						sendstringf("  This was a write entry. Making it writable\n");
+						temp.WA = 1;
+					} else if (eptWatchList[ID].Type == EPTW_READWRITE) {
+						sendstringf("  This was an access entry. Making it readable and writable");
+						temp.RA = 1;
+						temp.WA = 1;
 
-      if ((c->eptWatchList) && (ID<c->eptWatchListLength) && (c->eptWatchList[ID]))
-      {
-        if (isAMD)
-        {
-          _PTE_PAE temp=*(PPTE_PAE)(c->eptWatchList[ID]);
-          if (eptWatchList[ID].Type==EPTW_WRITE)
-          {
-            temp.RW=1; //back to writable
-          }
-          else if (eptWatchList[ID].Type==EPTW_READWRITE)
-          {
-            temp.P=1;
-            temp.RW=1;
-            temp.EXB=0;
-          }
-          else
-          {
-            temp.EXB=0;
-          }
+						if (has_EPT_ExecuteOnlySupport == 0) {
+							sendstringf(" and executable as this cpu does not support execute only pages\n");
+							temp.XA = 1;
+						}
+					} else {
+						sendstringf("  This was an execute entry. Making it executable");
+						temp.XA = 1;
+					}
 
-          *(PPTE_PAE)(c->eptWatchList[ID])=temp;
-        }
-        else
-        {
+					*(c->eptWatchList[ID])=temp;
+				}
 
-          EPT_PTE temp=*(c->eptWatchList[ID]);
-          if (eptWatchList[ID].Type==EPTW_WRITE)
-          {
-            sendstringf("  This was a write entry. Making it writable\n");
-            temp.WA=1;
-          }
-          else if (eptWatchList[ID].Type==EPTW_READWRITE)
-          {
-            sendstringf("  This was an access entry. Making it readable and writable");
-            temp.RA=1;
-            temp.WA=1;
-            if (has_EPT_ExecuteOnlySupport==0)
-            {
-              sendstringf(" and executable as this cpu does not support execute only pages\n");
-              temp.XA=1;
-            }
-          }
-          else
-          {
-              sendstringf("  This was an execute entry. Making it executable");
-              temp.XA=1;
-          }
+				_wbinvd();
+				c->eptUpdated = 1;
 
-
-
-          *(c->eptWatchList[ID])=temp;
-        }
-
-        _wbinvd();
-        c->eptUpdated=1;
-
-        unmapPhysicalMemoryGlobal(c->eptWatchList[ID], sizeof(EPT_PTE));
-        c->eptWatchList[ID]=NULL;
-
-
-      }
+				unmapPhysicalMemoryGlobal(c->eptWatchList[ID], sizeof(EPT_PTE));
+				c->eptWatchList[ID] = NULL;
+			}
 
 #ifdef USENMIFORWAIT
-      if ((canExitOnNMI) && (c!=currentcpuinfo))
-        c->WaitTillDone=0;
+			if ((canExitOnNMI) && (c != currentcpuinfo)) {
+				c->WaitTillDone = 0;
+			}
 #endif
+			csLeave(&c->EPTPML4CS);
+			c = c->next;
+		}
 
+		getcpuinfo()->LastVMCallDebugPos = 7;
+		ept_invalidate();
+	} else {
+		sendstringf("  hasAnotherOne is set\n");
+	}
 
-      csLeave(&c->EPTPML4CS);
-      c=c->next;
-    }
+	getcpuinfo()->LastVMCallDebugPos = 8;
+	eptWatchList[ID].Active = 0;
+	free(eptWatchList[ID].Log);
+	eptWatchList[ID].Log = NULL;
 
-    getcpuinfo()->LastVMCallDebugPos=7;
+	getcpuinfo()->LastVMCallDebugPos = 9;
+	csLeave(&eptWatchListCS);
 
-    ept_invalidate();
-  }
-  else
-  {
-    sendstringf("  hasAnotherOne is set\n");
-  }
-
-  getcpuinfo()->LastVMCallDebugPos=8;
-  eptWatchList[ID].Active=0;
-  free(eptWatchList[ID].Log);
-  eptWatchList[ID].Log=NULL;
-
-  getcpuinfo()->LastVMCallDebugPos=9;
-  csLeave(&eptWatchListCS);
-
-  getcpuinfo()->LastVMCallDebugPos=10;
-  return 0;
+	getcpuinfo()->LastVMCallDebugPos = 10;
+	return 0;
 }
 
 
-int MTC_RPS(int mt1, int mt2)
-{
-  //memory type cache rock paper scissors
-  if (mt1==mt2)
-    return mt1;
-
-  if ((mt1==MTC_UC) || (mt2==MTC_UC))
-      return MTC_UC;
-
-  if (((mt1==MTC_WT) && (mt2==MTC_WB)) || ((mt2==MTC_WT) && (mt1==MTC_WB)) )
-    return MTC_WT;
-
-  if ((mt1==MTC_WP) || (mt2==MTC_WP))
-    return MTC_WP;
-
-  if ((mt1==MTC_WB) || (mt2!=MTC_WB))
-    return mt2;
-  else
-    return min(mt1,mt2);
+int MTC_RPS(int mt1, int mt2) {
+	//memory type cache rock paper scissors
+	if (mt1 == mt2) {
+		return mt1;
+	}
+	if ((mt1 == MTC_UC) || (mt2 == MTC_UC)){
+		return MTC_UC;
+	}
+	if (((mt1 == MTC_WT) && (mt2 == MTC_WB)) || ((mt2 == MTC_WT) && (mt1 == MTC_WB))) {
+		return MTC_WT;
+	}
+	if ((mt1 == MTC_WP) || (mt2 == MTC_WP)) {
+		return MTC_WP;
+	}
+	if ((mt1 == MTC_WB) || (mt2 != MTC_WB)) {
+		return mt2;
+	} else {
+		return min(mt1,mt2);
+	}
 }
 
-typedef struct _MEMRANGE
-{
-  QWORD startaddress;
-  QWORD size;
-  int memtype;
+typedef struct _MEMRANGE {
+	QWORD startaddress;
+	QWORD size;
+	int memtype;
 } MEMRANGE, *PMEMRANGE;
 
-criticalSection memoryrangesCS={.name="memoryrangesCS", .debuglevel=2};
+criticalSection memoryrangesCS={.name = "memoryrangesCS", .debuglevel = 2};
+
 MEMRANGE *memoryranges;
-int memoryrangesLength;
-int memoryrangesPos;
+int memoryrangesLength = 0;
+int memoryrangesPos = 0;
 
-void getMTRRMapInfo(QWORD startaddress, QWORD size, int *fullmap, int *memtype)
-/*
- * pre: startaddress is aligned on the boundary you wish to map
- *
- * post: fullmap is 1 if the size can be fully mapped without conflicts (border crossings)
- */
-{
-  //note: the list is sorted
-  QWORD starta=startaddress;
-  QWORD stopa=startaddress+size-1;
-  int i;
+void getMTRRMapInfo(QWORD startaddress, QWORD size, int *fullmap, int *memtype) {
+	/*
+	 * pre: startaddress is aligned on the boundary you wish to map
+	 *
+	 * post: fullmap is 1 if the size can be fully mapped without conflicts (border crossings)
+	 */
+	//note: the list is sorted
+	QWORD starta = startaddress;
+	QWORD stopa = startaddress + size - 1;
 
-  *memtype=MTRRDefType.TYPE; //if not found, this is the result (usually uncached)
-  *fullmap=1;
+	*memtype = MTRRDefType.TYPE; //if not found, this is the result (usually uncached)
+	*fullmap = 1;
 
- // sendstringf("getMTRRMapInfo(%6, %x)\n", startaddress, size);
+	// sendstringf("getMTRRMapInfo(%6, %x)\n", startaddress, size);
+	//csEnter(&memoryrangesCS); //currently addToMemoryRanges is only called BEFORE ept exceptions happen. So this cs is not neede
+	for (int i = 0; i < memoryrangesPos; i++) {
+		QWORD startb = 0, stopb = 0;
 
+		startb = memoryranges[i].startaddress;
+		stopb = memoryranges[i].startaddress+memoryranges[i].size - 1;
 
-  //csEnter(&memoryrangesCS); //currently addToMemoryRanges is only called BEFORE ept exceptions happen. So this cs is not neede
-  for (i=0; i<memoryrangesPos; i++)
-  {
-    QWORD startb,stopb;
-    startb=memoryranges[i].startaddress;
-    stopb=memoryranges[i].startaddress+memoryranges[i].size-1;
+		if ((starta <= stopb) && (startb <= stopa)) {
+			//overlap, check the details
+			if ((starta >= startb) && (stopa <= stopb)) { //falls completely within the region, so can be fully mapped.
+				*memtype = memoryranges[i].memtype;//set the memory type
+			} else {
+				*fullmap = 0; //mark as not fully mappable, go one level lower
+			}
+			return;
+		}
 
-    if ((starta <= stopb) && (startb <= stopa))
-    {
-      //overlap, check the details
-      if ((starta>=startb) && (stopa<=stopb)) //falls completely within the region, so can be fully mapped.
-        *memtype=memoryranges[i].memtype;//set the memory type
-      else
-        *fullmap=0; //mark as not fully mappable, go one level lower
+		if (stopa<startb) {//reached a startaddress higher than my stopaddress, which means every other item will be as well
+			return;
+		}
+	}
+	//csLeave(&memoryrangesCS);
+}
 
-      return;
-    }
+void addToMemoryRanges(QWORD address, QWORD size, int type) {
+	/*
+	 * pre: memoryrangesCS lock has been aquired
+	 */
+	if (size == 0) return;
 
-    if (stopa<startb) //reached a startaddress higher than my stopaddress, which means every other item will be as well
-      return;
-  }
-  //csLeave(&memoryrangesCS);
+	//add memory for a new entry
+	if (memoryrangesPos == memoryrangesLength) {
+		sendstringf("INF: addToMemoryRanges realloc\n");
+		memoryranges = realloc2(memoryranges, memoryrangesLength * sizeof(MEMRANGE), 2 * memoryrangesLength * sizeof(MEMRANGE));
+		memoryrangesLength = memoryrangesLength * 2;
+	}
+
+	memoryranges[memoryrangesPos].startaddress = address;
+	memoryranges[memoryrangesPos].size = size;
+	memoryranges[memoryrangesPos].memtype = type;
+
+	memoryrangesPos++;
+}
+
+void sanitizeMemoryRegions() {
+	//find overlapping regions and calculate the best memtype
+	//----------------------------------------------------------
+	//|
+	//|
+	int i = 0, j = 0;
+
+	for (; i < memoryrangesPos; i++) {
+		QWORD starta = memoryranges[i].startaddress;
+		QWORD stopa = memoryranges[i].startaddress + memoryranges[i].size - 1;
+
+		if (memoryranges[i].size == 0) {
+			continue;
+		}
+		if (i > 100) {
+			while (1) {
+				outportb(0x80, 0x10);
+				sendstringf("It's OVER");
+				outportb(0x80, 0x00);
+				sendstringf(" 100!!!!!!\n");
+			}
+		}
+
+		sendstringf("INF: Checking %d (%6 - %6):%d for overlap\n", i, starta, stopa, memoryranges[i].memtype);
+		j = i + 1;
+
+		while (j < memoryrangesPos) {
+			if (j == i) {
+				continue;
+			}
+			if (memoryranges[j].size == 0) {
+				continue;
+			}
+
+			if (j > 100) {
+				while (1) {
+					outportb(0x80, 0x11);
+					sendstringf("It's OVER");
+					outportb(0x80, 0x10);
+					sendstringf(" 100 again!!!!!!\n");
+				}
+			}
+
+			QWORD startb = memoryranges[j].startaddress;
+			QWORD stopb = memoryranges[j].startaddress + memoryranges[j].size - 1;
+
+			if ((starta <= stopb) && (startb <= stopa)) {
+				//3 parts: left, overlap, right.  Left and right can be 0 width
+				MEMRANGE left;
+				MEMRANGE overlap;
+				MEMRANGE right;
+
+				left.size = 0;
+				left.memtype = 0;
+				left.startaddress = 0;
+
+				right.size = 0;
+				right.memtype = 0;
+				right.startaddress = 0;
+
+				//overlaps
+				QWORD newstart = 0;
+				QWORD newstop = 0;
+
+				sendstringf("  Overlaps with %d (%6 - %6):%d\n", j, startb, stopb, memoryranges[j].memtype);
+
+				//left:
+				newstart = minq(starta, startb);
+				newstop = maxq(starta, startb);
+
+				left.startaddress = newstart;
+				left.size = newstop - newstart;
+				left.memtype = starta < startb
+					? memoryranges[i].memtype
+					: memoryranges[j].memtype;
+
+				//right:
+				newstart = minq(stopa, stopb) + 1;
+				newstop = maxq(stopa, stopb) + 1;
+
+				sendstringf("    debug: right: newstart=%6 newstop=%6\n", newstart, newstop);
+
+				right.startaddress = newstart;
+				right.size = newstop - newstart;
+				right.memtype = stopb < stopa
+					? memoryranges[i].memtype
+					: memoryranges[j].memtype;
+
+				overlap.startaddress = left.startaddress + left.size;
+				overlap.size = right.startaddress - overlap.startaddress;
+				overlap.memtype = MTC_RPS(memoryranges[i].memtype, memoryranges[j].memtype);
+
+				if (left.size) {
+					addToMemoryRanges(left.startaddress, left.size, left.memtype);
+					sendstringf("    Left becomes (%6 - %6):%d\n", left.startaddress, left.startaddress+left.size-1, left.memtype);
+				} else {
+					sendstringf("    Left is empty\n");
+				}
+
+				if (right.size) {
+					addToMemoryRanges(right.startaddress, right.size, right.memtype);
+					sendstringf("    Right becomes (%6 - %6):%d\n", right.startaddress, right.startaddress+right.size-1, right.memtype);
+				} else {
+					sendstringf("    Right is empty\n");
+				}
+
+				//adjust the current entry
+				memoryranges[i].startaddress = overlap.startaddress;
+				memoryranges[i].size = overlap.size;
+				memoryranges[i].memtype = overlap.memtype;
+				sendstringf("    This becomes (%6 - %6):%d\n", memoryranges[i].startaddress, memoryranges[i].startaddress+memoryranges[i].size-1, memoryranges[i].memtype);
+
+				starta = memoryranges[i].startaddress;
+				stopa = memoryranges[i].startaddress + memoryranges[i].size - 1;
+
+				//mark as handled
+				int k;
+				for (k = j; k < memoryrangesPos - 1; k++) {
+					memoryranges[k]=memoryranges[k+1];
+				}
+
+				memoryrangesPos--;
+				continue;
+			}
+			j++;
+		}
+	}
+
+	//now that the list has been sanitized delete entries with the same type as the default (not before)
+	i = 0;
+	while (i < memoryrangesPos) {
+		if (memoryranges[i].memtype == MTRRDefType.TYPE) {
+			for (j = i; j < memoryrangesPos - 1; j++) {
+				memoryranges[j] = memoryranges[j+1];
+			}
+
+			memoryrangesPos--;
+			continue;
+		}
+		i++;
+	}
+
+	//sort the list
+	for (i = 0; i < memoryrangesPos; i++) {
+		for (j = i; j < memoryrangesPos; j++) {
+			if (memoryranges[j].startaddress < memoryranges[i].startaddress) {
+				//swap
+				MEMRANGE temp = memoryranges[i];
+				memoryranges[i] = memoryranges[j];
+				memoryranges[j] = temp;
+			}
+		}
+	}
 }
 
 
-
-void addToMemoryRanges(QWORD address, QWORD size, int type)
-/*
- * pre: memoryrangesCS lock has been aquired
- */
-{
-  if (size==0) return;
-
-  //add memory for a new entry
-  if (memoryrangesPos==memoryrangesLength)
-  {
-    sendstringf("addToMemoryRanges realloc\n");
-    memoryranges=realloc2(memoryranges, memoryrangesLength*sizeof(MEMRANGE), 2*memoryrangesLength*sizeof(MEMRANGE));
-    memoryrangesLength=memoryrangesLength*2;
-  }
-
-  memoryranges[memoryrangesPos].startaddress=address;
-  memoryranges[memoryrangesPos].size=size;
-  memoryranges[memoryrangesPos].memtype=type;
-
-  memoryrangesPos++;
-}
-
-void sanitizeMemoryRegions()
-{
-  //find overlapping regions and calculate the best memtype
-  //----------------------------------------------------------
-  //|
-  //|
-  int i=0,j;
-
-
-
-  for (i=0; i<memoryrangesPos; i++)
-  {
-    QWORD starta=memoryranges[i].startaddress;
-    QWORD stopa=memoryranges[i].startaddress+memoryranges[i].size-1;
-
-    if (memoryranges[i].size==0)
-      continue;
-
-    if (i>100)
-    {
-      while (1)
-      {
-        outportb(0x80,0x10);
-        sendstringf("It's OVER");
-        outportb(0x80,0x00);
-        sendstringf(" 100!!!!!!\n");
-      }
-
-    }
-
-    sendstringf("Checking %d (%6 - %6):%d for overlap\n", i, starta, stopa, memoryranges[i].memtype);
-
-    j=i+1;
-    while (j<memoryrangesPos)
-    {
-      if (j==i) continue;
-      if (memoryranges[j].size==0)
-        continue;
-
-      if (j>100)
-      {
-        while (1)
-        {
-          outportb(0x80,0x11);
-          sendstringf("It's OVER");
-          outportb(0x80,0x10);
-          sendstringf(" 100 again!!!!!!\n");
-        }
-      }
-
-
-      QWORD startb=memoryranges[j].startaddress;
-      QWORD stopb=memoryranges[j].startaddress+memoryranges[j].size-1;
-
-      if ((starta <= stopb) && (startb <= stopa))
-      {
-        //3 parts: left, overlap, right.  Left and right can be 0 width
-        MEMRANGE left;
-        MEMRANGE overlap;
-        MEMRANGE right;
-        left.size=0;
-        left.memtype=0;
-        left.startaddress=0;
-
-        right.size=0;
-        right.memtype=0;
-        right.startaddress=0;
-
-        //overlaps
-        QWORD newstart;
-        QWORD newstop;
-
-        sendstringf("  Overlaps with %d (%6 - %6):%d\n", j, startb, stopb, memoryranges[j].memtype);
-
-        //left:
-        newstart=minq(starta,startb);
-        newstop=maxq(starta,startb);
-
-        left.startaddress=newstart;
-        left.size=newstop-newstart;
-        left.memtype=starta<startb?memoryranges[i].memtype:memoryranges[j].memtype;
-
-        //right:
-        newstart=minq(stopa,stopb)+1;
-        newstop=maxq(stopa,stopb)+1;
-
-        sendstringf("    debug: right: newstart=%6 newstop=%6\n", newstart, newstop);
-
-        right.startaddress=newstart;
-        right.size=newstop-newstart;
-        right.memtype=stopb<stopa?memoryranges[i].memtype:memoryranges[j].memtype;
-
-        overlap.startaddress=left.startaddress+left.size;
-        overlap.size=right.startaddress-overlap.startaddress;
-        overlap.memtype=MTC_RPS(memoryranges[i].memtype, memoryranges[j].memtype);
-
-
-        if (left.size)
-        {
-          addToMemoryRanges(left.startaddress, left.size, left.memtype);
-          sendstringf("    Left becomes (%6 - %6):%d\n", left.startaddress, left.startaddress+left.size-1, left.memtype);
-        }
-        else
-          sendstringf("    Left is empty\n");
-
-
-        if (right.size)
-        {
-          addToMemoryRanges(right.startaddress, right.size, right.memtype);
-          sendstringf("    Right becomes (%6 - %6):%d\n", right.startaddress, right.startaddress+right.size-1, right.memtype);
-        }
-        else
-          sendstringf("    Right is empty\n");
-
-        //adjust the current entry
-        memoryranges[i].startaddress=overlap.startaddress;
-        memoryranges[i].size=overlap.size;
-        memoryranges[i].memtype=overlap.memtype;
-        sendstringf("    This becomes (%6 - %6):%d\n", memoryranges[i].startaddress, memoryranges[i].startaddress+memoryranges[i].size-1, memoryranges[i].memtype);
-
-        starta = memoryranges[i].startaddress;
-        stopa = memoryranges[i].startaddress + memoryranges[i].size - 1;
-
-
-        //mark as handled
-        int k;
-        for (k=j; k<memoryrangesPos-1; k++)
-          memoryranges[k]=memoryranges[k+1];
-
-        memoryrangesPos--;
-
-        continue;
-      }
-      j++;
-    }
-  }
-
-  //now that the list has been sanitized delete entries with the same type as the default (not before)
-  i=0;
-  while (i<memoryrangesPos)
-  {
-    if (memoryranges[i].memtype==MTRRDefType.TYPE)
-    {
-      for (j=i; j<memoryrangesPos-1; j++)
-        memoryranges[j]=memoryranges[j+1];
-
-      memoryrangesPos--;
-      continue;
-    }
-    i++;
-  }
-
-
-  //sort the list
-  for (i=0; i<memoryrangesPos; i++)
-  {
-    for (j=i; j<memoryrangesPos; j++)
-    {
-      if (memoryranges[j].startaddress<memoryranges[i].startaddress)
-      {
-        //swap
-        MEMRANGE temp=memoryranges[i];
-        memoryranges[i]=memoryranges[j];
-        memoryranges[j]=temp;
-      }
-    }
-  }
-}
-
-
-void initMemTypeRanges()
+void initMemTypeRanges() {
 //builds an array of memory ranges and their cache
-{
-  int i;
-  if (memoryrangesPos)
+  int i = 0;
+
+  if (memoryrangesPos) {
     return; //already initialized
+  }
 
   csEnter(&memoryrangesCS);
+  memoryrangesPos = 0;
 
-  memoryrangesPos=0;
-
-  if (memoryranges==NULL)
-  {
-    memoryrangesLength=32;
-    memoryranges=malloc2(sizeof(MEMRANGE)*memoryrangesLength);
+  if (memoryranges==NULL) {
+    memoryrangesLength = 32;
+    memoryranges = malloc2(sizeof(MEMRANGE) * memoryrangesLength);
   }
 
-  sendstringf("Memory ranges:\n");
+  sendstringf("INF: Memory ranges:\n");
 
+  QWORD startaddress = 0;
+  QWORD size = 0;
+  int memtype = -1;
 
-  QWORD startaddress=0;
-  QWORD size=0;
-  int memtype=-1;
+  if ((MTRRCapabilities.FIX && MTRRDefType.FE)) {
+    sendstringf("INF: Using Fixed MTRRs\n");
 
-  if ((MTRRCapabilities.FIX && MTRRDefType.FE))
-  {
-    sendstringf("Using Fixed MTRRs\n");
-
-    QWORD FIX64K_00000=readMSR(IA32_MTRR_FIX64K_00000);  //0606060606060606
-    QWORD FIX16K_80000=readMSR(IA32_MTRR_FIX16K_80000);
-    QWORD FIX16K_A0000=readMSR(IA32_MTRR_FIX16K_A0000);
-    QWORD FIX4K_C0000 =readMSR(IA32_MTRR_FIX4K_C0000);
-    QWORD FIX4K_C8000 =readMSR(IA32_MTRR_FIX4K_C8000);
-    QWORD FIX4K_D0000 =readMSR(IA32_MTRR_FIX4K_D0000);
-    QWORD FIX4K_D8000 =readMSR(IA32_MTRR_FIX4K_D8000);
-    QWORD FIX4K_E0000 =readMSR(IA32_MTRR_FIX4K_E0000);
-    QWORD FIX4K_E8000 =readMSR(IA32_MTRR_FIX4K_E8000);
-    QWORD FIX4K_F0000 =readMSR(IA32_MTRR_FIX4K_F0000);
-    QWORD FIX4K_F8000 =readMSR(IA32_MTRR_FIX4K_F8000);
+    QWORD FIX64K_00000 = readMSR(IA32_MTRR_FIX64K_00000);  //0606060606060606
+    QWORD FIX16K_80000 = readMSR(IA32_MTRR_FIX16K_80000);
+    QWORD FIX16K_A0000 = readMSR(IA32_MTRR_FIX16K_A0000);
+    QWORD FIX4K_C0000 = readMSR(IA32_MTRR_FIX4K_C0000);
+    QWORD FIX4K_C8000 = readMSR(IA32_MTRR_FIX4K_C8000);
+    QWORD FIX4K_D0000 = readMSR(IA32_MTRR_FIX4K_D0000);
+    QWORD FIX4K_D8000 = readMSR(IA32_MTRR_FIX4K_D8000);
+    QWORD FIX4K_E0000 = readMSR(IA32_MTRR_FIX4K_E0000);
+    QWORD FIX4K_E8000 = readMSR(IA32_MTRR_FIX4K_E8000);
+    QWORD FIX4K_F0000 = readMSR(IA32_MTRR_FIX4K_F0000);
+    QWORD FIX4K_F8000 = readMSR(IA32_MTRR_FIX4K_F8000);
     //check the fixed range mtrs
 
-    while (startaddress+size<0x100000)
-    {
-      QWORD types;
-      int type;
-      int sizeinc=0;
+    while (startaddress + size < 0x100000) {
+      QWORD types = 0;
+      int type = 0;
+      int sizeinc = 0;
 
-      switch (startaddress+size)
-      {
-        case 0 ... 0x7ffff:
-        {
-          types=FIX64K_00000;
-          int index=(startaddress+size) >> 16;
-          type=(types >> (index*8)) & 0xf;
-          sizeinc=64*1024;
-          break;
-        }
+	  switch (startaddress+size) {
+		  case 0 ... 0x7ffff:
+			  {
+				  types = FIX64K_00000;
+				  int index = (startaddress + size) >> 16;
+				  type = (types >> (index * 8)) & 0xf;
+				  sizeinc = 64 * 1024;
+				  break;
+			  }
 
-        case 0x80000 ... 0x9ffff:
-        {
-          types=FIX16K_80000;
-          int index=((startaddress+size)-0x80000) >> 14;
-          type=(types >> (index*8)) & 0xf;
-          sizeinc=16*1024;
-          break;
-        }
+		  case 0x80000 ... 0x9ffff:
+			  {
+				  types = FIX16K_80000;
+				  int index = ((startaddress + size) - 0x80000) >> 14;
+				  type = (types >> (index * 8)) & 0xf;
+				  sizeinc = 16 * 1024;
+				  break;
+			  }
 
-        case 0xa0000 ... 0xbffff:
-        {
-          types=FIX16K_A0000;
-          int index=((startaddress+size)-0xa0000) >> 14;
-          type=(types >> (index*8)) & 0xf;
-          sizeinc=16*1024;
-          break;
-        }
+		  case 0xa0000 ... 0xbffff:
+			  {
+				  types = FIX16K_A0000;
+				  int index = ((startaddress + size) - 0xa0000) >> 14;
+				  type = (types >> (index * 8)) & 0xf;
+				  sizeinc = 16 * 1024;
+				  break;
+			  }
 
-        case 0xc0000 ... 0xc7fff:
-        {
-          types=FIX4K_C0000;
-          int index=((startaddress+size)-0xc0000) >> 12;
-          type=(types >> (index*8)) & 0xf;
-          sizeinc=4*1024;
-          break;
-        }
+		  case 0xc0000 ... 0xc7fff:
+			  {
+				  types = FIX4K_C0000;
+				  int index = ((startaddress + size) - 0xc0000) >> 12;
+				  type = (types >> (index * 8)) & 0xf;
+				  sizeinc = 4 * 1024;
+				  break;
+			  }
 
-        case 0xc8000 ... 0xcffff:
-        {
-          types=FIX4K_C8000;
-          int index=((startaddress+size)-0xc8000) >> 12;
-          type=(types >> (index*8)) & 0xf;
-          sizeinc=4*1024;
-          break;
-        }
+		  case 0xc8000 ... 0xcffff:
+			  {
+				  types = FIX4K_C8000;
+				  int index = ((startaddress + size) - 0xc8000) >> 12;
+				  type = (types >> (index * 8)) & 0xf;
+				  sizeinc = 4 * 1024;
+				  break;
+			  }
 
-        case 0xd0000 ... 0xd7fff:
-        {
-          types=FIX4K_D0000;
-          int index=((startaddress+size)-0xd0000) >> 12;
-          type=(types >> (index*8)) & 0xf;
-          sizeinc=4*1024;
-          break;
-        }
+		  case 0xd0000 ... 0xd7fff:
+			  {
+				  types = FIX4K_D0000;
+				  int index = ((startaddress + size) - 0xd0000) >> 12;
+				  type = (types >> (index * 8)) & 0xf;
+				  sizeinc = 4 * 1024;
+				  break;
+			  }
 
-        case 0xd8000 ... 0xdffff:
-        {
-          types=FIX4K_D8000;
-          int index=((startaddress+size)-0xd8000) >> 12;
-          type=(types >> (index*8)) & 0xf;
-          sizeinc=4*1024;
-          break;
-        }
+		  case 0xd8000 ... 0xdffff:
+			  {
+				  types = FIX4K_D8000;
+				  int index = ((startaddress + size) - 0xd8000) >> 12;
+				  type = (types >> (index * 8)) & 0xf;
+				  sizeinc = 4 * 1024;
+				  break;
+			  }
 
-        case 0xe0000 ... 0xe7fff:
-        {
-          types=FIX4K_E0000;
-          int index=((startaddress+size)-0xe0000) >> 12;
-          type=(types >> (index*8)) & 0xf;
-          sizeinc=4*1024;
-          break;
-        }
+		  case 0xe0000 ... 0xe7fff:
+			  {
+				  types = FIX4K_E0000;
+				  int index = ((startaddress + size) - 0xe0000) >> 12;
+				  type = (types >> (index * 8)) & 0xf;
+				  sizeinc = 4 * 1024;
+				  break;
+			  }
 
-        case 0xe8000 ... 0xeffff:
-        {
-          types=FIX4K_E8000;
-          int index=((startaddress+size)-0xe8000) >> 12;
-          type=(types >> (index*8)) & 0xf;
-          sizeinc=4*1024;
-          break;
-        }
+		  case 0xe8000 ... 0xeffff:
+			  {
+				  types = FIX4K_E8000;
+				  int index = ((startaddress + size) - 0xe8000) >> 12;
+				  type = (types >> (index * 8)) & 0xf;
+				  sizeinc = 4 * 1024;
+				  break;
+			  }
 
-        case 0xf0000 ... 0xf7fff:
-        {
-          types=FIX4K_F0000;
-          int index=((startaddress+size)-0xf0000) >> 12;
-          type=(types >> (index*8)) & 0xf;
-          sizeinc=4*1024;
-          break;
-        }
+		  case 0xf0000 ... 0xf7fff:
+			  {
+				  types = FIX4K_F0000;
+				  int index = ((startaddress + size) - 0xf0000) >> 12;
+				  type = (types >> (index * 8)) & 0xf;
+				  sizeinc = 4 * 1024;
+				  break;
+			  }
 
-        case 0xf8000 ... 0xfffff:
-        {
-          types=FIX4K_F8000;
-          int index=((startaddress+size)-0xf8000) >> 12;
-          type=(types >> (index*8)) & 0xf;
-          sizeinc=4*1024;
-          break;
-        }
-      }
+		  case 0xf8000 ... 0xfffff:
+			  {
+				  types = FIX4K_F8000;
+				  int index = ((startaddress + size) - 0xf8000) >> 12;
+				  type = (types >> (index * 8)) & 0xf;
+				  sizeinc = 4 * 1024;
+				  break;
+			  }
+	  }
 
-      sendstringf("Checking fixed mtrr %6 - %6 : %d      (%6)\n", startaddress+size, startaddress+size+sizeinc-1, memtype, types);
+      sendstringf("INF: Checking fixed mtrr %6 - %6 : %d      (%6)\n", startaddress+size, startaddress+size+sizeinc-1, memtype, types);
 
+	  // TODO: leaving off here...
       if (memtype==-1)
         memtype=type;
 
