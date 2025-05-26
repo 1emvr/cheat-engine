@@ -150,9 +150,9 @@ void vmm_entry2_hlt(pcpuinfo currentcpuinfo)
   nosendchar[getAPICID()]=0;
 
   if (currentcpuinfo)
-    sendstringf("CPU %d : Terminating...\n\r",currentcpuinfo->cpunr);
+    sendstringf("INF: CPU %d : Terminating...\n\r",currentcpuinfo->cpunr);
   else
-    sendstringf("Unknown(%d) terminating...", getcpunr() );
+    sendstringf("INF: Unknown(%d) terminating...", getcpunr() );
 
   while (1)
   {
