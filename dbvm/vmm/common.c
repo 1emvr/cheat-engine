@@ -18,163 +18,141 @@ multiple sources. (e.g vmm and vmloader)
 void sendstringf_nolock(char *string UNUSED, ...);
 #endif
 
-QWORD textmemory=0x0b8000;
+QWORD textmemory = 0x0b8000;
 
-QWORD spinlocktimeout=0;
+QWORD spinlocktimeout = 0;
 
 criticalSection sendstringfCS={.name="sendstringfCS", .debuglevel=1};
 criticalSection sendstringCS={.name="sendstringCS", .debuglevel=1};
 
 #ifdef DELAYEDSERIAL
-int useserial=0;
+int useserial = 0;
 #endif
 
 
-#if DISPLAYDEBUG==1
-int linessincelastkey=0;
+#if DISPLAYDEBUG == 1
+int linessincelastkey = 0;
 PStackList displaydebuglog_back, displaydebuglog_forward;
-
-
-
 #endif
 
-int screenheight=25;
-
+int screenheight = 25;
 extern int popcnt_support(QWORD val);
-int popcnt_nosupport(QWORD val)
-{
-  int i;
-  int result=0;
-  for (i=0; i<64; i++)
-  {
-    if (val&1)
-      result++;
 
-    val=val >> 1;
+int popcnt_nosupport(QWORD val) {
+	int result = 0;
 
-    if (val==0)
-      return result;
-  }
+	for (int i = 0; i < 64; i++) {
+		if (val & 1) {
+			result++;
+		}
 
-  return result;
+		val = val >> 1;
+		if (val == 0)
+			return result;
+	}
+
+	return result;
 }
 
-POPCNT_IMPLEMENTATION popcnt=popcnt_nosupport;
+POPCNT_IMPLEMENTATION popcnt = popcnt_nosupport;
 
-
-
-void bochsbp(void)
-{
+void bochsbp(void) {
 	asm volatile ("xchg %bx,%bx");
 }
 
-
-
-unsigned char inportb(unsigned int port)
-{
-   unsigned char ret;
-   asm volatile ("inb %%dx,%%al":"=a" (ret):"d" (port));
-   return ret & 0xff;
+unsigned char inportb(unsigned int port) {
+	unsigned char ret = 0;
+	asm volatile ("inb %%dx,%%al":"=a" (ret):"d" (port));
+	return ret & 0xff;
 }
 
-void outportb(unsigned int port,unsigned char value)
-{
+void outportb(unsigned int port,unsigned char value) {
 #ifdef DEBUG
-  if (port==0x80)
-  {
-    nosendchar[getAPICID()]=0;
+  if (port == 0x80) {
+    nosendchar[getAPICID()] = 0;
     sendstringf_nolock("            -  Debug Code %2  -\n", value);
   }
 #endif
    asm volatile ("outb %%al,%%dx": :"d" (port), "a" (value));
 }
 
-unsigned long inportd(unsigned int port)
-{
-   unsigned long ret;
+unsigned long inportd(unsigned int port) {
+   unsigned long ret = 0;
    asm volatile ("inl %%dx,%%eax":"=a" (ret):"d" (port));
    return ret;
 }
 
-void outportd(unsigned int port,unsigned long value)
-{
+void outportd(unsigned int port,unsigned long value) {
    asm volatile ("outl %%eax,%%dx": :"d" (port), "a" (value));
 }
 
-
-QWORD minq(QWORD x,QWORD y)
-{
-  return (x<y)?x:y;
+QWORD minq(QWORD x,QWORD y) {
+  return (x < y) ? x : y;
 }
 
-QWORD maxq(QWORD x,QWORD y)
-{
-  return (x>y)?x:y;
+QWORD maxq(QWORD x,QWORD y) {
+  return (x > y) ? x : y;
 }
 
-int min(int x,int y)
-{
-  return (x<y)?x:y;
+int min(int x,int y) {
+  return (x < y) ? x : y;
 }
 
-int max(int x,int y)
-{
-  return (x>y)?x:y;
+int max(int x,int y) {
+  return (x > y) ? x : y;
+}
+
+size_t strspn(const char *str, const char *chars) {
+	int i, j;
+
+	for (i = 0; str[i]; i++) {
+		for (j = 0; chars[j]; j++) {
+			if (chars) {
+				break;
+			}
+		}
+		if (!chars[j]) {
+			break;
+		}
+	}
+	return (i);
+}
+
+void exit(int status) {
+	nosendchar[getAPICID()] = 0;
+	sendstringf("INF: Exit DBVM with status %d\n", status);
+
+	ddDrawRectangle(0, DDVerticalResolution - 100, 100, 100, 0xff0000);
+	while (1) {
+		outportb(0x80, 0xc0);
+	}
+}
+
+void abort(void) {
+	nosendchar[getAPICID()] = 0;
+	sendstringf("INF: Abort DBVM\n");
+
+	ddDrawRectangle(0, DDVerticalResolution - 100, 100, 100, 0xff0000);
+	while (1) {
+		outportb(0x80,0xc1);
+	}
 }
 
 
-
-size_t strspn(const char *str, const char *chars)
-{
-  int i, j;
-
-  for (i = 0; str[i]; i++) {
-    for (j = 0; chars[j]; j++) {
-      if (chars)
-        break;
-    }
-    if (!chars[j])
-      break;
-  }
-  return (i);
+int isalpha(int c) {
+	return (((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c >= 'z')));
 }
 
-void exit(int status)
-{
-  nosendchar[getAPICID()]=0;
-	sendstringf("Exit DBVM with status %d\n", status);
-	ddDrawRectangle(0,DDVerticalResolution-100,100,100,0xff0000);
-	while (1) outportb(0x80,0xc0);
+int isdigit(int c) {
+	return ((c >= '0') && (c <= '9'));
 }
 
-void abort(void)
-{
-  nosendchar[getAPICID()]=0;
-  sendstringf("Abort DBVM\n");
-  ddDrawRectangle(0,DDVerticalResolution-100,100,100,0xff0000);
-  while (1) outportb(0x80,0xc1);
+int isspace(int c) {
+  return (c == ' ');
 }
 
-
-int isalpha(int c)
-{
-  return (((c>='A') && (c<='Z')) || ((c>='a') && (c>='z')));
-}
-
-int isdigit(int c)
-{
-  return ((c>='0') && (c<='9'));
-}
-
-int isspace(int c)
-{
-  return (c==' ');
-}
-
-int iscntrl(int c)
-{
-	switch (c)
-	{
+int iscntrl(int c) {
+	switch (c) 	{
 		case '\n':
 		case '\r':
 		case '\t':
@@ -186,27 +164,22 @@ int iscntrl(int c)
 	}
 }
 
-int toupper(int c)
-{
+int toupper(int c) {
   //unset bit 5
-  return (c & (~(1<<5)));
+	return (c & (~(1 << 5)));
 }
 
-int tolower(int c)
-{
+int tolower(int c) {
   //set bit 5
-  return (c | (1<< 5));
+	return (c | (1 <<  5));
 }
 
-int isgraph(int c)
-{
-  return (c>=33) && (c<=126);
+int isgraph(int c) {
+	return (c >= 33) && (c <= 126);
 }
 
-int islower(int c)
-{
-  return (c>=97) && (c<=122);
-
+int islower(int c) {
+	return (c >= 97) && (c <= 122);
 }
 
 int isupper(int c)
@@ -215,741 +188,633 @@ int isupper(int c)
 
 }
 
-int isprint(int c)
-{
-  return (c>=32) && (c<=126);
+int isprint(int c) {
+	return (c >= 32) && (c <= 126);
 }
 
-int ispunct(int c)
-{
-  return isprint(c) && (!isspace(c)) && (!isalpha(c));
+int ispunct(int c) {
+	return isprint(c) && (!isspace(c)) && (!isalpha(c));
 }
 
-
-
-int isxdigit(int c)
-{
-  return ((c>=48) && (c<=57)) || ((c>=65) && (c<=70)) || ((c>=97) && (c<=102));
+int isxdigit(int c) {
+	return ((c >= 48) && (c <= 57)) || ((c >= 65) && (c <= 70)) || ((c >= 97) && (c <= 102));
 }
 
-
-double floor(double x)
-{
+double floor(double x) {
   return (int) x - (x < (int) x);
 }
 
-double ceil(double x)
-{
+double ceil(double x) {
   return (int) x + (x > (int) x);
 }
 
-double fmod(double a, double b)
-{
+double fmod(double a, double b) {
     return (a - b * floor(a / b));
 }
 
-double sqrt(double x)
-{
-	sendstringf("DBVM doesn't do powers or roots atm");
+double sqrt(double x) {
+	sendstringf("INF: DBVM doesn't do powers or roots atm");
 	return x;
 }
 
-
-double pow(double x, double y)
-{
-	sendstringf("DBVM doesn't do powers or roots atm");
+double pow(double x, double y) {
+	sendstringf("INF: DBVM doesn't do powers or roots atm");
 	return x*y;
 }
 
-double frexp(double x UNUSED, int *exp UNUSED)
-{
-  sendstringf("DBVM doesn't do frexp yet");
-  return 0;
+double frexp(double x UNUSED, int *exp UNUSED) {
+	sendstringf("INF: DBVM doesn't do frexp yet");
+	return 0;
 }
 
-
-int isalnum(int c)
-{
+int isalnum(int c) {
   return (isalpha(c) || isdigit(c));
 }
 
-int memcmp(const void *s1, const void *s2, size_t n)
-{
-  unsigned int i;
-  unsigned char *m1=(unsigned char *)s1;
-  unsigned char *m2=(unsigned char *)s2;
+int memcmp(const void *s1, const void *s2, size_t n) {
+	unsigned char *m1 = (unsigned char*)s1;
+	unsigned char *m2 = (unsigned char*)s2;
 
-  for (i=0; i<n; i++)
-  {
-    if (m1[i]>m2[i])
-      return 1;
+	for (int i = 0; i <n ; i++) {
+		if (m1[i] > m2[i]) {
+			return 1;
+		}
 
-    if (m1[i]<m2[i])
-      return -1;
-  }
+		if (m1[i] < m2[i])
+			return -1;
+	}
 
-  return 0;
-
+	return 0;
 }
 
-int strcmp(const char *s1, const char *s2)
-{
-  int i=0;
-  while (s1[i] || s2[i])
-  {
-    if (s1[i]>s2[i])
-      return 1;
+int strcmp(const char *s1, const char *s2) {
+	int i = 0;
+	while (s1[i] || s2[i]) {
+		if (s1[i] > s2[i]) {
+			return 1;
+		}
+		if (s1[i] < s2[i]) {
+			return -1;
+		}
+		i++;
+	}
 
-    if (s1[i]<s2[i])
-      return -1;
-
-    i++;
-  }
-
-  return 0;
+	return 0;
 }
 
 
-char *addCharToString(char c, char* string, int lastpos, int *stringsize)
-/*
- * Adds a char to a variablesize string
- * */
-{
-  if ((*stringsize==0) || (string==NULL))
-  {
-    string=(char *)malloc(8);
-    *stringsize=8;
-  }
+char *addCharToString(char c, char* string, int lastpos, int *stringsize) { // Adds a char to a variablesize string
+	if ((*stringsize == 0) || (string == NULL)) {
+		string = (char *)malloc(8);
+		*stringsize = 8;
+	}
 
-  if (lastpos>=(*stringsize))
-  {
-    int newsize=min((*stringsize)*2, (*stringsize)+4096);
-    string=(char *)realloc(string, newsize);
+	if (lastpos >= (*stringsize)) {
+		int newsize = min((*stringsize) * 2, (*stringsize) + 4096);
+		string = (char*)realloc(string, newsize);
 
-    *stringsize=newsize;
-  }
+		*stringsize = newsize;
+	}
 
-  string[lastpos]=c;
-  return string;
+	string[lastpos] = c;
+	return string;
 }
 
-int strncmp(const char *s1, const char *s2, size_t n)
-{
-  unsigned int i=0;
-  while ((i<n) && (s1[i] || s2[i]))
-  {
-    if (s1[i]>s2[i])
-      return 1;
+int strncmp(const char *s1, const char *s2, size_t n) {
+	unsigned int i = 0;
 
-    if (s1[i]<s2[i])
-      return -1;
+	while ((i < n) && (s1[i] || s2[i])) {
+		if (s1[i] > s2[i]) {
+			return 1;
+		}
 
-    i++;
-  }
+		if (s1[i] < s2[i]) {
+			return -1;
+		}
+		i++;
+	}
 
-  return 0;
+	return 0;
 }
 
-char *strstr(const char *haystack, const char *needle)
-{
-  int i;
-  int needlelength=strlen(needle);
-  for (i=0; haystack[i]; i++)
-  {
-    char *currentstring=(char *)&haystack[i];
-    if (strncmp(currentstring,needle,needlelength)==0)
-      return currentstring;
-  }
+char *strstr(const char *haystack, const char *needle) {
+	int needlelength = strlen(needle);
 
-  return NULL;
-}
+	for (int i = 0; haystack[i]; i++) {
+		char *currentstring = (char*)&haystack[i];
 
-size_t strcspn(const char *s, const char *reject)
-{
-	int i,j;
-	for (i=0; s[i]; i++)
-	{
-		for (j=0; reject[j]; j++)
-		{
-			if (s[i]==reject[j])
-				return i;
+		if (strncmp(currentstring, needle, needlelength) == 0) {
+			return currentstring;
 		}
 	}
 
-	return i-1;
+	return NULL;
 }
 
-int strcoll(const char *s1, const char *s2)
-{
-  return strcmp(s1,s2);
+size_t strcspn(const char *s, const char *reject) {
+	int i, j;
+
+	for (i = 0; s[i]; i++) {
+		for (j = 0; reject[j]; j++) {
+			if (s[i] == reject[j]) {
+				return i;
+			}
+		}
+	}
+	return i - 1;
 }
 
-char *strchr(const char *s, int c)
-{
-  int i;
-  for (i=0; s[i]; i++)
-    if (s[i]==c)
-      return (char*)&s[i];
-
-  return NULL;
+int strcoll(const char *s1, const char *s2) {
+  return strcmp(s1, s2);
 }
 
-char *strpbrk(const char *s, const char *accept)
-{
-  int i, j;
+char *strchr(const char *s, int c) {
+	for (int i = 0; s[i]; i++) {
+		if (s[i] == c) {
+			return (char*)&s[i];
+		}
+	}
 
-  int al=strlen(accept);
-
-  for (i = 0; s[i] != '\0';i++)
-  {
-    for (j=0; j<al; j++)
-      if (s[i]== accept[j])
-      {
-        return (char *)&s[i];
-      }
-  }
-
-  return NULL;
+	return NULL;
 }
 
-#define ISSPACE(c) (c==' ')
+char *strpbrk(const char *s, const char *accept) {
+	int al = strlen(accept);
 
-double atof(char* num)
- {
-     if (!num || !*num)
-         return 0;
-     double integerPart = 0;
-     double fractionPart = 0;
-     int divisorForFraction = 1;
-     int sign = 1;
-     int inFraction = 0;
-     /*Take care of +/- sign*/
-     if (*num == '-')
-     {
-         ++num;
-         sign = -1;
-     }
-     else if (*num == '+')
-     {
-         ++num;
-     }
-     while (*num != '\0')
-     {
-         if (*num >= '0' && *num <= '9')
-         {
-             if (inFraction)
-             {
-                 /*See how are we converting a character to integer*/
-                 fractionPart = fractionPart*10 + (*num - '0');
-                 divisorForFraction *= 10;
-             }
-             else
-             {
-                 integerPart = integerPart*10 + (*num - '0');
-             }
-         }
-         else if (*num == '.')
-         {
-             if (inFraction)
-                 return sign * (integerPart + fractionPart/divisorForFraction);
-             else
-                 inFraction = 1;
-         }
-         else
-         {
-             return sign * (integerPart + fractionPart/divisorForFraction);
-         }
-         ++num;
-     }
-     return sign * (integerPart + fractionPart/divisorForFraction);
- }
+	for (int i = 0; s[i] != '\0'; i++) {
+		for (int j = 0; j < al; j++) {
+			if (s[i] == accept[j]) {
+				return (char *)&s[i];
+			}
+		}
+	}
 
-double strtod(const char *str, char **ptr)
-{
-  char *p;
-
-    p = (char *)str;
-
-    if (ptr==NULL)
-      return atof((char *)str);
-
-    while (ISSPACE (*p))
-      ++p;
-
-    if (*p == '+' || *p == '-')
-      ++p;
-
-    /* INF or INFINITY.  */
-    if ((p[0] == 'i' || p[0] == 'I')
-        && (p[1] == 'n' || p[1] == 'N')
-        && (p[2] == 'f' || p[2] == 'F'))
-      {
-        if ((p[3] == 'i' || p[3] == 'I')
-      && (p[4] == 'n' || p[4] == 'N')
-      && (p[5] == 'i' || p[5] == 'I')
-      && (p[6] == 't' || p[6] == 'T')
-      && (p[7] == 'y' || p[7] == 'Y'))
-    {
-      *ptr = p + 8;
-      return atof ((char *)str);
-    }
-        else
-    {
-      *ptr = p + 3;
-      return atof ((char *)str);
-    }
-      }
-
-    /* NAN or NAN(foo).  */
-    if ((p[0] == 'n' || p[0] == 'N')
-        && (p[1] == 'a' || p[1] == 'A')
-        && (p[2] == 'n' || p[2] == 'N'))
-      {
-        p += 3;
-        if (*p == '(')
-    {
-      ++p;
-      while (*p != '\0' && *p != ')')
-        ++p;
-      if (*p == ')')
-        ++p;
-    }
-        *ptr = p;
-        return atof ((char *)str);
-      }
-
-    /* digits, with 0 or 1 periods in it.  */
-    if (isdigit(*p) || *p == '.')
-      {
-        int got_dot = 0;
-        while (isdigit (*p) || (!got_dot && *p == '.'))
-    {
-      if (*p == '.')
-        got_dot = 1;
-      ++p;
-    }
-
-        /* Exponent.  */
-        if (*p == 'e' || *p == 'E')
-    {
-      int i;
-      i = 1;
-      if (p[i] == '+' || p[i] == '-')
-        ++i;
-      if (isdigit (p[i]))
-        {
-          while (isdigit (p[i]))
-      ++i;
-          *ptr = p + i;
-          return atof ((char *)str);
-        }
-    }
-        *ptr = p;
-        return atof ((char *)str);
-      }
-    /* Didn't find any digits.  Doesn't look like a number.  */
-    *ptr = (char *)str;
-    return 0.0;
+	return NULL;
 }
 
-void *memchr(const void *s, int c, size_t n)
-{
-  size_t i;
-  unsigned char usc=(unsigned char)c;
-  unsigned char *a=(unsigned char *)s;
+#define ISSPACE(c) (c == ' ')
 
-  for (i=0; i<n; i++)
-  {
-    if (a[i]==usc)
-      return &a[i];
-  }
+double atof(char* num) {
+	if (!num || !*num) {
+		return 0;
+	}
 
-  return NULL;
+	double integerPart = 0;
+	double fractionPart = 0;
+	int divisorForFraction = 1;
+	int sign = 1;
+	int inFraction = 0;
+
+	/*Take care of +/- sign*/
+	if (*num == '-') {
+		++num;
+		sign = -1;
+	} else if (*num == '+') {
+		++num;
+	}
+
+	while (*num != '\0') {
+		if (*num >= '0' && *num <= '9') {
+			if (inFraction) {
+				/*See how are we converting a character to integer*/
+				fractionPart = fractionPart*10 + (*num - '0');
+				divisorForFraction *= 10;
+			} else {
+				integerPart = integerPart*10 + (*num - '0');
+			}
+		} else if (*num == '.') {
+			if (inFraction) {
+				return sign * (integerPart + fractionPart/divisorForFraction);
+			} else {
+				inFraction = 1;
+			}
+		} else {
+			return sign * (integerPart + fractionPart/divisorForFraction);
+		}
+		++num;
+	}
+	return sign * (integerPart + fractionPart/divisorForFraction);
 }
 
-int vbuildstring(char *str, int size, char *string, __builtin_va_list arglist)
-{
-  struct
-  {
-    int type;
-    int size;
-    int digitcount;
-  } varlist[64];
-  //unsigned char varlist[64];
-  char temps[100];
-  char workstring[strlen(string)];
-  int i,_i,l,strpos,vlc;
-  //int count;
-
-  //int debug=0;
-  l=strlen(string);
-  vlc=0;
-
-  if (size==0)
-    return 0;
-
-  strpos=0;
-
-  // work on the copy of string, not the original
-  for (i=0; (unsigned int)i<strlen(string); i++)
-    workstring[i]=string[i];
-
-  zeromemory(varlist,64);
-
-  for (i=0; i<64; i++)
-  {
-    varlist[i].type=255;
-    varlist[i].digitcount=0;
-  }
-
-
-  // parse the string for known operators
-  for (i=0; i<l; i++)
-  {
-    if (workstring[i]=='%')
-    {
-      int additional=0; //gets added to the size
-
-      workstring[i]=0;
-
-      if ((i+1<l) && (workstring[i+1]=='.'))
-      {
-        workstring[i+1]=0;
-        additional++;
-        if ((i+2<l) && (isdigit(workstring[i+2])))  //%.#(xxxx)
-        {
-          varlist[vlc].digitcount=workstring[i+2]-'0';
-          workstring[i+2]=0;
-
-          additional++;
-          i+=2;
-        }
-      }
-
-      if ((i+1<l) && (workstring[i+1]=='l'))
-      {
-
-        if ((i+2<l) && (workstring[i+2]=='l'))
-        {
-          if ((i+3<l) && (workstring[i+3]=='d')) //%lld
-          {
-            varlist[vlc].type=7; //64-bit decimal
-            varlist[vlc].size=4;
-          }
-          else
-          if ((i+3<l) && (workstring[i+3]=='x')) //%llx
-          {
-            varlist[vlc].type=8; //64-bit(16 char) hexadecimal
-            varlist[vlc].size=4;
-          }
-        }
-
-      }
-
-      if (workstring[i+1]=='d') //decimal
-      {
-        varlist[vlc].type=0;
-        varlist[vlc].size=2;
-      }
-      else
-      if (workstring[i+1]=='x') //hex
-      {
-        varlist[vlc].type=1;
-        varlist[vlc].size=2;
-      }
-      else
-      if (workstring[i+1]=='8') //8 char hex (%8)
-      {
-        varlist[vlc].type=3;
-        varlist[vlc].size=2;
-      }
-      else
-      if (workstring[i+1]=='p') //6 char hex (%p)
-      {
-        varlist[vlc].type=4;
-        varlist[vlc].size=2;
-      }
-      else
-      if (workstring[i+1]=='6') //16 char hex (%8)
-      {
-        varlist[vlc].type=4;
-        varlist[vlc].size=2;
-      }
-      else
-      if (workstring[i+1]=='2') //2 char hex (%2)
-      {
-        varlist[vlc].type=6;
-        varlist[vlc].size=2;
-      }
-      else
-      if (workstring[i+1]=='s') //string
-      {
-        varlist[vlc].type=2;
-        varlist[vlc].size=2;
-      }
-      else
-      if (workstring[i+1]=='c') //char
-      {
-        varlist[vlc].type=5;
-        varlist[vlc].size=2;
-      }
-
-      varlist[vlc].size+=additional;
-
-      workstring[i+1]=0;
-      vlc++;
-
-      if (vlc>=64) //todo: malloc/realloc
-        break;
-    }
-  }
-
-  i=0;
-  vlc=0;
-
-
-  while ((i<l) && (strpos<size))
-  {
-    if (workstring[i]==0)
-    {
-      if (varlist[vlc].type==255)
-      {
-        printstring("UNDEFINED VARLIST",60,22,2,4);
-        sendstring("UNDEFINED VARLIST");
-
-        return 0;
-
-      }
-
-      switch (varlist[vlc].type)
-      {
-        case 0: //decimal
-        {
-          unsigned int x;
-          x=__builtin_va_arg(arglist,unsigned int);
-          itoa(x,10,temps,100);
-
-          _i=strlen(temps);
-          if (strpos+_i>=size)
-            _i=size-(strpos+_i-size);
-
-          copymem(&str[strpos],temps,_i);
-          strpos+=_i;
-          break;
-        }
-
-        case 1: //hex
-        {
-          unsigned int x;
-          x=__builtin_va_arg(arglist,unsigned int);
-          itoa(x,16,temps,100);
-
-          _i=strlen(temps);
-          if (strpos+_i>=size)
-            _i=size-(strpos+_i-size);
-
-          copymem(&str[strpos],temps,_i);
-          strpos+=_i;
-
-          break;
-        }
-
-        case 3: //%8, DWORD
-        {
-          unsigned int x;
-          x=__builtin_va_arg(arglist,unsigned int);
-          itoa(x,16,temps,100);
-
-          appendzero(temps,8,100);
-
-          _i=strlen(temps);
-          if (strpos+_i>=size)
-            _i=size-(strpos+_i-size);
-
-          copymem(&str[strpos],temps,_i);
-          strpos+=_i;
-          break;
-        }
-
-        case 6: //%2, char
-        {
-
-          unsigned char x;
-          x=__builtin_va_arg(arglist,int);
-
-
-          itoa(x,16,temps,100);
-          appendzero(temps,2,100);
-
-          _i=strlen(temps);
-
-          if (strpos+_i>=size)
-            _i=size-(strpos+_i-size);
-
-          copymem(&str[strpos],temps,_i);
-          strpos+=_i;
-          break;
-        }
-
-        case 7: //%lld
-        {
-          long long x;
-          x=__builtin_va_arg(arglist,long long);
-          lltoa(x,10,temps,100);
-
-          _i=strlen(temps);
-          if (strpos+_i>=size)
-            _i=size-(strpos+_i-size);
-
-          copymem(&str[strpos],temps,_i);
-          strpos+=_i;
-          break;
-        }
-
-
-
-        case 255:
-          printstring("UNDEFINED VARLIST",40,21,2,4);
-          sendstring("UNDEFINED VARLIST");
-          /*printstring(string,40,22,2,4);
-          printstring(temps,40,23,2,4);
-          printstring(str,40,24,2,4);*/\
-
-          if (strpos>=size)
-            strpos=size-1;
-
-          str[strpos]=0;
-
-          return strpos;
-          break;
-
-      }
-
-      //todo: move to switch/case above
-      if (varlist[vlc].type==2) //string
-      {
-        char *s=__builtin_va_arg(arglist,char *);
-
-        _i=strlen(s);
-        if (strpos+_i>size)
-          _i=size-(strpos+_i-size);
-
-        copymem(&str[strpos],s,_i);
-        strpos+=_i;
-      }
-
-      if ((varlist[vlc].type==4) || (varlist[vlc].type==8)) //16 char hex or llx
-      {
-        unsigned long long i=__builtin_va_arg(arglist,unsigned long long);
-
-        lltoa(i,16,temps,100);
-        if (varlist[vlc].type==4)
-          appendzero(temps,16,100);
-        else
-        if (varlist[vlc].digitcount>0)
-          appendzero(temps,varlist[vlc].digitcount,100);
-
-
-        _i=strlen(temps);
-        if (strpos+_i>=size)
-          _i=size-(strpos+_i-size);
-
-        copymem(&str[strpos],temps,_i);
-        strpos+=_i;
-      }
-
-      if (varlist[vlc].type==5) //char
-      {
-        int c=__builtin_va_arg(arglist,int);
-
-        str[strpos]=(char)c;
-        strpos++;
-      }
-
-      //todo: ^^^^^^^^
-
-      i+=varlist[vlc].size;
-
-      vlc++; //next paramtype
-      continue;
-    }
-    else
-    {
-      //else a normal char
-      str[strpos]=workstring[i];
-      strpos++;
-
-      if (strpos>=size)
-      {
-        str[size-1]=0;
-        return size; //enough
-      }
-      i++;
-    }
-
-  }
-
-
-
-  if (strpos>=size)
-    strpos=size-1;
-
-
-  str[strpos]=0;
-  return strpos;
+double strtod(const char *str, char **ptr) {
+	char *p = (char*)str;
+
+	if (ptr == NULL) {
+		return atof((char *)str);
+	}
+
+	while (ISSPACE(*p)) {
+		++p;
+	}
+
+	if (*p == '+' || *p == '-') {
+		++p;
+	}
+
+	/* INF or INFINITY.  */
+	if ((p[0] == 'i' || p[0] == 'I') && 
+			(p[1] == 'n' || p[1] == 'N') && 
+			(p[2] == 'f' || p[2] == 'F')) {
+
+		if ((p[3] == 'i' || p[3] == 'I') && 
+				(p[4] == 'n' || p[4] == 'N') && 
+				(p[5] == 'i' || p[5] == 'I') && 
+				(p[6] == 't' || p[6] == 'T') && 
+				(p[7] == 'y' || p[7] == 'Y')) {
+
+			*ptr = p + 8;
+			return atof ((char *)str);
+		} else {
+			*ptr = p + 3;
+			return atof ((char *)str);
+		}
+	}
+
+	/* NAN or NAN(foo).  */
+	if ((p[0] == 'n' || p[0] == 'N')
+			&& (p[1] == 'a' || p[1] == 'A')
+			&& (p[2] == 'n' || p[2] == 'N')) {
+
+		p += 3;
+		if (*p == '(') {
+			++p;
+			while (*p != '\0' && *p != ')') {
+				++p;
+			}
+			if (*p == ')') {
+				++p;
+			}
+		}
+		*ptr = p;
+		return atof ((char *)str);
+	}
+
+	/* digits, with 0 or 1 periods in it.  */
+	if (isdigit(*p) || *p == '.') {
+		int got_dot = 0;
+		while (isdigit (*p) || (!got_dot && *p == '.')) {
+			if (*p == '.') {
+				got_dot = 1;
+			}
+			++p;
+		}
+
+		/* Exponent.  */
+		if (*p == 'e' || *p == 'E') {
+			int i = 1;
+			if (p[i] == '+' || p[i] == '-') {
+				++i;
+			}
+			if (isdigit (p[i])) {
+				while (isdigit (p[i])) {
+					++i;
+				}
+				*ptr = p + i;
+				return atof ((char *)str);
+			}
+		}
+		*ptr = p;
+		return atof ((char *)str);
+	}
+	/* Didn't find any digits.  Doesn't look like a number.  */
+	*ptr = (char *)str;
+	return 0.0;
 }
 
-void sendstring(char *s UNUSED)
-{
+void *memchr(const void *s, int c, size_t n) {
+	unsigned char usc = (unsigned char)c;
+	unsigned char *a = (unsigned char *)s;
+
+	for (size_t i = 0; i < n; i++) {
+		if (a[i] == usc) {
+			return &a[i];
+		}
+	}
+
+	return NULL;
+}
+
+int vbuildstring(char *str, int size, char *string, __builtin_va_list arglist) {
+	struct {
+		int type;
+		int size;
+		int digitcount;
+	} varlist[64];
+	//unsigned char varlist[64];
+
+	char temps[100];
+	char workstring[strlen(string)];
+	int _i = 0, i = 0, strpos = 0, vlc = 0, l = strlen(string);
+	//int count;
+
+	if (size == 0) {
+		return 0;
+	}
+
+	//int debug=0;
+	// work on the copy of string, not the original
+	for (int i = 0; (unsigned int)i < strlen(string); i++) {
+		workstring[i]=string[i];
+	}
+
+	zeromemory(varlist,64);
+	for (i = 0; i < 64; i++) {
+		varlist[i].type = 255;
+		varlist[i].digitcount = 0;
+	}
+
+	// parse the string for known operators
+	for (int i = 0; i < l; i++) {
+		if (workstring[i] == '%') {
+			int additional = 0; //gets added to the size
+			workstring[i] = 0;
+
+			if ((i + 1 < l) && (workstring[i + 1]=='.')) {
+				workstring[i + 1] = 0;
+				additional++;
+
+				if ((i + 2 < l) && (isdigit(workstring[i + 2]))) { //%.#(xxxx)
+					varlist[vlc].digitcount = workstring[i + 2] - '0';
+					workstring[i + 2] = 0;
+					additional++;
+
+					i += 2;
+				}
+			}
+
+			if ((i + 1 < l) && (workstring[i + 1] == 'l')) {
+				if ((i + 2 < l) && (workstring[i + 2] == 'l')) {
+					if ((i + 3 < l) && (workstring[i + 3] == 'd')) {//%lld
+						varlist[vlc].type = 7; //64-bit decimal
+						varlist[vlc].size = 4;
+					} else if ((i+3<l) && (workstring[i+3]=='x')) { //%llx
+						varlist[vlc].type = 8; //64-bit(16 char) hexadecimal
+						varlist[vlc].size = 4;
+					}
+				}
+			}
+
+			if (workstring[i + 1] == 'd') {//decimal
+				varlist[vlc].type = 0;
+				varlist[vlc].size = 2;
+			} else if (workstring[i+1]=='x') {//hex
+				varlist[vlc].type = 1;
+				varlist[vlc].size = 2;
+			} else if (workstring[i + 1] == '8') {//8 char hex (%8)
+				varlist[vlc].type = 3;
+				varlist[vlc].size = 2;
+			} else if (workstring[i + 1] == 'p') {//6 char hex (%p)
+				varlist[vlc].type = 4;
+				varlist[vlc].size = 2;
+			} else if (workstring[i + 1] == '6') {//16 char hex (%8)
+				varlist[vlc].type = 4;
+				varlist[vlc].size = 2;
+			} else if (workstring[i + 1] == '2') {//2 char hex (%2)
+				varlist[vlc].type = 6;
+				varlist[vlc].size = 2;
+			} else if (workstring[i + 1] == 's') {//string
+				varlist[vlc].type = 2;
+				varlist[vlc].size = 2;
+			} else if (workstring[i + 1] == 'c') {//char
+				varlist[vlc].type = 5;
+				varlist[vlc].size = 2;
+			}
+
+			varlist[vlc].size+=additional;
+			workstring[i + 1] = 0;
+			vlc++;
+
+			if (vlc>=64) {//todo: malloc/realloc
+				break;
+			}
+		}
+	}
+
+	i = 0;
+	vlc = 0;
+
+	while ((i < l) && (strpos < size)) {
+		if (workstring[i] == 0) {
+			if (varlist[vlc].type == 255) {
+				printstring("UNDEFINED VARLIST", 60, 22, 2, 4);
+				sendstring("UNDEFINED VARLIST");
+
+				return 0;
+			}
+
+			switch (varlist[vlc].type) {
+				case 0: //decimal
+					{
+						unsigned int x = __builtin_va_arg(arglist, unsigned int);
+						itoa(x, 10, temps, 100);
+
+						_i = strlen(temps);
+						if (strpos + _i >= size)  {
+							_i=size-(strpos+_i-size);
+						}
+
+						copymem(&str[strpos], temps, _i);
+						strpos += _i;
+						break;
+					}
+
+				case 1: //hex
+					{
+						unsigned int x;
+						x=__builtin_va_arg(arglist,unsigned int);
+						itoa(x,16,temps,100);
+
+						_i=strlen(temps);
+
+						if (strpos+_i>=size) {
+							_i=size-(strpos+_i-size);
+						}
+
+						copymem(&str[strpos],temps,_i);
+						strpos+=_i;
+
+						break;
+					}
+
+				case 3: //%8, DWORD
+					{
+						unsigned int x = __builtin_va_arg(arglist, unsigned int);
+						itoa(x, 16, temps, 100);
+
+						appendzero(temps, 8, 100);
+						_i = strlen(temps);
+
+						if (strpos + _i >= size) {
+							_i = size - (strpos + _i - size);
+						}
+
+						copymem(&str[strpos], temps, _i);
+						strpos += _i;
+						break;
+					}
+
+				case 6: //%2, char
+					{
+						unsigned char x = __builtin_va_arg(arglist, int);
+						itoa(x, 16, temps, 100);
+
+						appendzero(temps, 2, 100);
+						_i=strlen(temps);
+
+						if (strpos + _i >= size) {
+							_i = size - (strpos + _i - size);
+						}
+
+						copymem(&str[strpos], temps, _i);
+						strpos += _i;
+						break;
+					}
+
+				case 7: //%lld
+					{
+						long long x = __builtin_va_arg(arglist, long long);
+						lltoa(x, 10, temps, 100);
+
+						_i = strlen(temps);
+
+						if (strpos + _i >= size) {
+							_i = size - (strpos + _i - size);
+						}
+
+						copymem(&str[strpos], temps, _i);
+						strpos += _i;
+						break;
+					}
+
+				case 255:
+					{
+						printstring("UNDEFINED VARLIST",40,21,2,4);
+						sendstring("UNDEFINED VARLIST");
+						/*printstring(string,40,22,2,4);
+						  printstring(temps,40,23,2,4);
+						  printstring(str,40,24,2,4);*/
+
+						if (strpos >= size) {
+							strpos = size - 1;
+						}
+						str[strpos] = 0;
+
+						return strpos;
+						break;
+					}
+			}
+
+			//todo: move to switch/case above
+			if (varlist[vlc].type == 2) {//string
+				char *s = __builtin_va_arg(arglist, char *);
+				_i = strlen(s);
+
+				if (strpos + _i > size) {
+					_i = size - (strpos + _i - size);
+				}
+
+				copymem(&str[strpos], s, _i);
+				strpos += _i;
+			}
+
+			if ((varlist[vlc].type == 4) || (varlist[vlc].type == 8)) {//16 char hex or llx
+				unsigned long long i = __builtin_va_arg(arglist, unsigned long long);
+				lltoa(i, 16, temps, 100);
+
+				if (varlist[vlc].type == 4) {
+					appendzero(temps, 16, 100);
+				} else if (varlist[vlc].digitcount > 0) {
+					appendzero(temps, varlist[vlc].digitcount, 100);
+				}
+
+				_i = strlen(temps);
+				if (strpos + _i >= size) {
+					_i = size - (strpos + _i - size);
+				}
+
+				copymem(&str[strpos], temps, _i);
+				strpos += _i;
+			}
+
+			if (varlist[vlc].type == 5) {//char
+				int c = __builtin_va_arg(arglist, int);
+
+				str[strpos] = (char)c;
+				strpos++;
+			}
+
+			//todo: ^^^^^^^^
+			i += varlist[vlc].size;
+			vlc++; //next paramtype
+
+			continue;
+		} else {
+			//else a normal char
+			str[strpos] = workstring[i];
+			strpos++;
+
+			if (strpos >= size) {
+				str[size - 1] = 0;
+				return size; //enough
+			}
+			i++;
+		}
+	}
+
+	if (strpos >= size) {
+		strpos = size - 1;
+	}
+
+	str[strpos] = 0;
+	return strpos;
+}
+
+void sendstring(char *s UNUSED) {
 #ifdef DELAYEDSERIAL
-  if (!useserial) return;
+	if (!useserial) return;
 #endif
 
 #ifdef DEBUG
-  #if DISPLAYDEBUG==1
-    displayline(s);
-  #else
-    int i;
+#if DISPLAYDEBUG == 1
+	displayline(s);
+#else
+	if (nosendchar[getAPICID()]) {
+		return;
+	}
+	csEnter(&sendstringCS);
 
-    if (nosendchar[getAPICID()])
-        return;
-
-
-    csEnter(&sendstringCS);
-
-    for (i=0; s[i] ; i++)
-      sendchar(s[i]);
-
-    csLeave(&sendstringCS);
-  #endif
+	for (int i = 0; s[i] ; i++) {
+		sendchar(s[i]);
+	}
+	csLeave(&sendstringCS);
+#endif
 #endif
 }
 
+// TOOD: leaving off here
 #ifdef DEBUG
-void sendstringf_nolock(char *string UNUSED, ...)
-{
+void sendstringf_nolock(char *string UNUSED, ...) {
 #ifdef DELAYEDSERIAL
-  if (!useserial) return;
+	if (!useserial) return;
 #endif
-  nosendchar[getAPICID()]=0;
+	nosendchar[getAPICID()] = 0;
 
-  __builtin_va_list arglist;
-  char temps[200];
-  int sl,i;
+	__builtin_va_list arglist;
+	char temps[200];
 
-  __builtin_va_start(arglist,string);
-  sl=vbuildstring(temps,200,string,arglist);
-  __builtin_va_end(arglist);
+	__builtin_va_start(arglist, string);
+	int sl = vbuildstring(temps, 200, string, arglist);
+	__builtin_va_end(arglist);
 
-  #if DISPLAYDEBUG==1
-    displayline(temps); //instead of sending the output to the serial port, output to the display
-  #else
-    if (sl>0)
-    {
-      for (i=0; i<sl; i++)
-        sendchar(temps[i]);
-    }
-  #endif
+#if DISPLAYDEBUG == 1
+	displayline(temps); //instead of sending the output to the serial port, output to the display
+#else
+	if (sl > 0) {
+		for (int i = 0; i < sl; i++) {
+			sendchar(temps[i]);
+		}
+	}
+#endif
 }
 #endif
 
