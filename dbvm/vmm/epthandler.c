@@ -3450,569 +3450,532 @@ void sanitizeMemoryRegions() {
 
 
 void initMemTypeRanges() {
-//builds an array of memory ranges and their cache
-  int i = 0;
+	//builds an array of memory ranges and their cache
+	int i = 0;
 
-  if (memoryrangesPos) {
-    return; //already initialized
-  }
+	if (memoryrangesPos) {
+		return; //already initialized
+	}
 
-  csEnter(&memoryrangesCS);
-  memoryrangesPos = 0;
+	csEnter(&memoryrangesCS);
+	memoryrangesPos = 0;
 
-  if (memoryranges==NULL) {
-    memoryrangesLength = 32;
-    memoryranges = malloc2(sizeof(MEMRANGE) * memoryrangesLength);
-  }
+	if (memoryranges==NULL) {
+		memoryrangesLength = 32;
+		memoryranges = malloc2(sizeof(MEMRANGE) * memoryrangesLength);
+	}
 
-  sendstringf("INF: Memory ranges:\n");
+	sendstringf("INF: Memory ranges:\n");
 
-  QWORD startaddress = 0;
-  QWORD size = 0;
-  int memtype = -1;
+	QWORD startaddress = 0;
+	QWORD size = 0;
+	int memtype = -1;
 
-  if ((MTRRCapabilities.FIX && MTRRDefType.FE)) {
-    sendstringf("INF: Using Fixed MTRRs\n");
+	if ((MTRRCapabilities.FIX && MTRRDefType.FE)) {
+		sendstringf("INF: Using Fixed MTRRs\n");
 
-    QWORD FIX64K_00000 = readMSR(IA32_MTRR_FIX64K_00000);  //0606060606060606
-    QWORD FIX16K_80000 = readMSR(IA32_MTRR_FIX16K_80000);
-    QWORD FIX16K_A0000 = readMSR(IA32_MTRR_FIX16K_A0000);
-    QWORD FIX4K_C0000 = readMSR(IA32_MTRR_FIX4K_C0000);
-    QWORD FIX4K_C8000 = readMSR(IA32_MTRR_FIX4K_C8000);
-    QWORD FIX4K_D0000 = readMSR(IA32_MTRR_FIX4K_D0000);
-    QWORD FIX4K_D8000 = readMSR(IA32_MTRR_FIX4K_D8000);
-    QWORD FIX4K_E0000 = readMSR(IA32_MTRR_FIX4K_E0000);
-    QWORD FIX4K_E8000 = readMSR(IA32_MTRR_FIX4K_E8000);
-    QWORD FIX4K_F0000 = readMSR(IA32_MTRR_FIX4K_F0000);
-    QWORD FIX4K_F8000 = readMSR(IA32_MTRR_FIX4K_F8000);
-    //check the fixed range mtrs
+		QWORD FIX64K_00000 = readMSR(IA32_MTRR_FIX64K_00000);  //0606060606060606
+		QWORD FIX16K_80000 = readMSR(IA32_MTRR_FIX16K_80000);
+		QWORD FIX16K_A0000 = readMSR(IA32_MTRR_FIX16K_A0000);
+		QWORD FIX4K_C0000 = readMSR(IA32_MTRR_FIX4K_C0000);
+		QWORD FIX4K_C8000 = readMSR(IA32_MTRR_FIX4K_C8000);
+		QWORD FIX4K_D0000 = readMSR(IA32_MTRR_FIX4K_D0000);
+		QWORD FIX4K_D8000 = readMSR(IA32_MTRR_FIX4K_D8000);
+		QWORD FIX4K_E0000 = readMSR(IA32_MTRR_FIX4K_E0000);
+		QWORD FIX4K_E8000 = readMSR(IA32_MTRR_FIX4K_E8000);
+		QWORD FIX4K_F0000 = readMSR(IA32_MTRR_FIX4K_F0000);
+		QWORD FIX4K_F8000 = readMSR(IA32_MTRR_FIX4K_F8000);
+		//check the fixed range mtrs
 
-    while (startaddress + size < 0x100000) {
-      QWORD types = 0;
-      int type = 0;
-      int sizeinc = 0;
+		while (startaddress + size < 0x100000) {
+			QWORD types = 0;
+			int type = 0;
+			int sizeinc = 0;
 
-	  switch (startaddress+size) {
-		  case 0 ... 0x7ffff:
-			  {
-				  types = FIX64K_00000;
-				  int index = (startaddress + size) >> 16;
-				  type = (types >> (index * 8)) & 0xf;
-				  sizeinc = 64 * 1024;
-				  break;
-			  }
+			switch (startaddress+size) {
+				case 0 ... 0x7ffff:
+					{
+						types = FIX64K_00000;
+						int index = (startaddress + size) >> 16;
+						type = (types >> (index * 8)) & 0xf;
+						sizeinc = 64 * 1024;
+						break;
+					}
 
-		  case 0x80000 ... 0x9ffff:
-			  {
-				  types = FIX16K_80000;
-				  int index = ((startaddress + size) - 0x80000) >> 14;
-				  type = (types >> (index * 8)) & 0xf;
-				  sizeinc = 16 * 1024;
-				  break;
-			  }
+				case 0x80000 ... 0x9ffff:
+					{
+						types = FIX16K_80000;
+						int index = ((startaddress + size) - 0x80000) >> 14;
+						type = (types >> (index * 8)) & 0xf;
+						sizeinc = 16 * 1024;
+						break;
+					}
 
-		  case 0xa0000 ... 0xbffff:
-			  {
-				  types = FIX16K_A0000;
-				  int index = ((startaddress + size) - 0xa0000) >> 14;
-				  type = (types >> (index * 8)) & 0xf;
-				  sizeinc = 16 * 1024;
-				  break;
-			  }
+				case 0xa0000 ... 0xbffff:
+					{
+						types = FIX16K_A0000;
+						int index = ((startaddress + size) - 0xa0000) >> 14;
+						type = (types >> (index * 8)) & 0xf;
+						sizeinc = 16 * 1024;
+						break;
+					}
 
-		  case 0xc0000 ... 0xc7fff:
-			  {
-				  types = FIX4K_C0000;
-				  int index = ((startaddress + size) - 0xc0000) >> 12;
-				  type = (types >> (index * 8)) & 0xf;
-				  sizeinc = 4 * 1024;
-				  break;
-			  }
+				case 0xc0000 ... 0xc7fff:
+					{
+						types = FIX4K_C0000;
+						int index = ((startaddress + size) - 0xc0000) >> 12;
+						type = (types >> (index * 8)) & 0xf;
+						sizeinc = 4 * 1024;
+						break;
+					}
 
-		  case 0xc8000 ... 0xcffff:
-			  {
-				  types = FIX4K_C8000;
-				  int index = ((startaddress + size) - 0xc8000) >> 12;
-				  type = (types >> (index * 8)) & 0xf;
-				  sizeinc = 4 * 1024;
-				  break;
-			  }
+				case 0xc8000 ... 0xcffff:
+					{
+						types = FIX4K_C8000;
+						int index = ((startaddress + size) - 0xc8000) >> 12;
+						type = (types >> (index * 8)) & 0xf;
+						sizeinc = 4 * 1024;
+						break;
+					}
 
-		  case 0xd0000 ... 0xd7fff:
-			  {
-				  types = FIX4K_D0000;
-				  int index = ((startaddress + size) - 0xd0000) >> 12;
-				  type = (types >> (index * 8)) & 0xf;
-				  sizeinc = 4 * 1024;
-				  break;
-			  }
+				case 0xd0000 ... 0xd7fff:
+					{
+						types = FIX4K_D0000;
+						int index = ((startaddress + size) - 0xd0000) >> 12;
+						type = (types >> (index * 8)) & 0xf;
+						sizeinc = 4 * 1024;
+						break;
+					}
 
-		  case 0xd8000 ... 0xdffff:
-			  {
-				  types = FIX4K_D8000;
-				  int index = ((startaddress + size) - 0xd8000) >> 12;
-				  type = (types >> (index * 8)) & 0xf;
-				  sizeinc = 4 * 1024;
-				  break;
-			  }
+				case 0xd8000 ... 0xdffff:
+					{
+						types = FIX4K_D8000;
+						int index = ((startaddress + size) - 0xd8000) >> 12;
+						type = (types >> (index * 8)) & 0xf;
+						sizeinc = 4 * 1024;
+						break;
+					}
 
-		  case 0xe0000 ... 0xe7fff:
-			  {
-				  types = FIX4K_E0000;
-				  int index = ((startaddress + size) - 0xe0000) >> 12;
-				  type = (types >> (index * 8)) & 0xf;
-				  sizeinc = 4 * 1024;
-				  break;
-			  }
+				case 0xe0000 ... 0xe7fff:
+					{
+						types = FIX4K_E0000;
+						int index = ((startaddress + size) - 0xe0000) >> 12;
+						type = (types >> (index * 8)) & 0xf;
+						sizeinc = 4 * 1024;
+						break;
+					}
 
-		  case 0xe8000 ... 0xeffff:
-			  {
-				  types = FIX4K_E8000;
-				  int index = ((startaddress + size) - 0xe8000) >> 12;
-				  type = (types >> (index * 8)) & 0xf;
-				  sizeinc = 4 * 1024;
-				  break;
-			  }
+				case 0xe8000 ... 0xeffff:
+					{
+						types = FIX4K_E8000;
+						int index = ((startaddress + size) - 0xe8000) >> 12;
+						type = (types >> (index * 8)) & 0xf;
+						sizeinc = 4 * 1024;
+						break;
+					}
 
-		  case 0xf0000 ... 0xf7fff:
-			  {
-				  types = FIX4K_F0000;
-				  int index = ((startaddress + size) - 0xf0000) >> 12;
-				  type = (types >> (index * 8)) & 0xf;
-				  sizeinc = 4 * 1024;
-				  break;
-			  }
+				case 0xf0000 ... 0xf7fff:
+					{
+						types = FIX4K_F0000;
+						int index = ((startaddress + size) - 0xf0000) >> 12;
+						type = (types >> (index * 8)) & 0xf;
+						sizeinc = 4 * 1024;
+						break;
+					}
 
-		  case 0xf8000 ... 0xfffff:
-			  {
-				  types = FIX4K_F8000;
-				  int index = ((startaddress + size) - 0xf8000) >> 12;
-				  type = (types >> (index * 8)) & 0xf;
-				  sizeinc = 4 * 1024;
-				  break;
-			  }
-	  }
+				case 0xf8000 ... 0xfffff:
+					{
+						types = FIX4K_F8000;
+						int index = ((startaddress + size) - 0xf8000) >> 12;
+						type = (types >> (index * 8)) & 0xf;
+						sizeinc = 4 * 1024;
+						break;
+					}
+			}
 
-      sendstringf("INF: Checking fixed mtrr %6 - %6 : %d      (%6)\n", startaddress+size, startaddress+size+sizeinc-1, memtype, types);
+			sendstringf("INF: Checking fixed mtrr %6 - %6 : %d      (%6)\n", startaddress+size, startaddress+size+sizeinc-1, memtype, types);
+			if (memtype == -1) {
+				memtype=type;
+			}
 
-	  // TODO: leaving off here...
-      if (memtype==-1)
-        memtype=type;
+			if (type == memtype) { //same type, continue
+				size+=sizeinc;
+			} else { //type changed
+				sendstringf("  -Adding %6 - %6 as type %d\n", startaddress, startaddress+size-1,memtype);
+				addToMemoryRanges(startaddress, size, memtype);
 
-      if (type==memtype) //same type, continue
-        size+=sizeinc;
-      else //type changed
-      {
-        sendstringf("  -Adding %6 - %6 as type %d\n", startaddress, startaddress+size-1,memtype);
-        addToMemoryRanges(startaddress, size, memtype);
+				//start a new region
+				startaddress=startaddress+size;
+				size=sizeinc;
+				memtype=type;
+			}
+		}
 
-        //start a new region
-        startaddress=startaddress+size;
-        size=sizeinc;
-        memtype=type;
-      }
-    }
+		if (size) { //last region needs to be added as well
+			sendstringf("  -Adding %6 - %6 as type %d\n", startaddress, startaddress+size-1,memtype);
+			addToMemoryRanges(startaddress, size, memtype);
+		}
+	}
 
-    if (size) //last region needs to be added as well
-    {
-      sendstringf("  -Adding %6 - %6 as type %d\n", startaddress, startaddress+size-1,memtype);
-      addToMemoryRanges(startaddress, size, memtype);
-    }
-  }
+	//check the var fields
+	sendstringf("INF: Checking var mtrrs\n");
+	for (i = 0; i < MTRRCapabilities.VCNT; i++) {
+		QWORD base = readMSR(IA32_MTRR_PHYSBASE0 + i * 2);
+		QWORD mask = readMSR(IA32_MTRR_PHYSMASK0 + i * 2);
 
-  //check the var fields
+		sendstringf("INF: Base=%6 Mask=%6\n", base, mask);
+		int memtype = base & 0xff;
 
-  sendstringf("Checking var mtrrs\n");
-  for (i=0; i<MTRRCapabilities.VCNT; i++)
-  {
-    QWORD base=readMSR(IA32_MTRR_PHYSBASE0+i*2);
-    QWORD mask=readMSR(IA32_MTRR_PHYSMASK0+i*2);
+		if (mask & (1 << 11)) { // && (memtype!=MTRRDefType.TYPE)) //valid
+								// Address_Within_Range AND PhysMask = PhysBase AND PhysMask
+								//strip of useless bits
+								//
+			base = base & MAXPHYADDRMASKPB;
+			mask = mask & MAXPHYADDRMASKPB;
 
-    sendstringf("Base=%6 Mask=%6\n", base, mask);
+			//find the highest 0 bit in the mask to find the region (this allows for the shitty “discontinuous” ranges)
+			int j;
+			for (;j = MAXPHYADDR - 1; j > 12; j--) {
+				if ((mask & ((QWORD)1 << j)) == 0) {
+					QWORD size = ((QWORD)1 << (j + 1)); //the last bit with 1
 
-    int memtype=base & 0xff;
+					sendstringf("    var mttr %d: %6 - %6  %d\n", i, base,base+size-1, memtype);
 
-    if (mask & (1<<11))// && (memtype!=MTRRDefType.TYPE)) //valid
-    {
-      // Address_Within_Range AND PhysMask = PhysBase AND PhysMask
+					addToMemoryRanges(base, size, memtype);
+					break;
+				}
+			}
+		}
+	}
 
-      //strip of useless bits
-      base=base & MAXPHYADDRMASKPB;
-      mask=mask & MAXPHYADDRMASKPB;
+	for (i = 0; i < memoryrangesPos; i++) {
+		QWORD address = memoryranges[i].startaddress;
+		QWORD size = memoryranges[i].size;
 
+		sendstringf("Memoryrange %d: %6 -> %6 : %d\n", i, address, address+size, memoryranges[i].memtype);
+	}
 
+	sanitizeMemoryRegions();
+	sendstringf("\n\n\nAfter sanitization:\n");
 
-      //find the highest 0 bit in the mask to find the region (this allows for the shitty “discontinuous” ranges)
-      int j;
+	for (i = 0; i < memoryrangesPos; i++) {
+		QWORD address = memoryranges[i].startaddress;
+		QWORD size = memoryranges[i].size;
 
-      for (j=MAXPHYADDR-1; j>12; j--)
-      {
-        if ((mask & ((QWORD)1<<j))==0)
-        {
-          QWORD size=((QWORD)1<<(j+1)); //the last bit with 1
+		sendstringf("INF: Memoryrange %d: %6 -> %6 : %d\n", i, address, address+size, memoryranges[i].memtype);
+	}
 
-          sendstringf("    var mttr %d: %6 - %6  %d\n", i, base,base+size-1, memtype);
-
-          addToMemoryRanges(base, size, memtype);
-          break;
-        }
-      }
-    }
-  }
-
-  for (i=0; i<memoryrangesPos; i++)
-  {
-    QWORD address=memoryranges[i].startaddress;
-    QWORD size=memoryranges[i].size;
-
-    sendstringf("Memoryrange %d: %6 -> %6 : %d\n", i, address, address+size, memoryranges[i].memtype);
-  }
-
-  sanitizeMemoryRegions();
-
-  sendstringf("\n\n\nAfter sanitization:\n");
-  for (i=0; i<memoryrangesPos; i++)
-  {
-    QWORD address=memoryranges[i].startaddress;
-    QWORD size=memoryranges[i].size;
-
-    sendstringf("Memoryrange %d: %6 -> %6 : %d\n", i, address, address+size, memoryranges[i].memtype);
-  }
-
-  csLeave(&memoryrangesCS);
+	csLeave(&memoryrangesCS);
 }
 
-
-
-int remapMTRRTypes(QWORD address UNUSED, QWORD size UNUSED, int type UNUSED)
-{
-  //called by the MSR write handler when MTRR registers get changed
-  initMemTypeRanges();
-
-  return 1;
+int remapMTRRTypes(QWORD address UNUSED, QWORD size UNUSED, int type UNUSED) {
+	//called by the MSR write handler when MTRR registers get changed
+	initMemTypeRanges();
+	return 1;
 }
 
-int handleMSRWrite_MTRR(void)
-//called when an MTRR msr is written. Figures out what regions have been modified
-{
-  initMemTypeRanges();
-  return 1;
+int handleMSRWrite_MTRR(void) {
+	//called when an MTRR msr is written. Figures out what regions have been modified
+	initMemTypeRanges();
+	return 1;
 }
 
+QWORD EPTMapPhysicalMemory(pcpuinfo currentcpuinfo, QWORD physicalAddress, int forcesmallpage) {
+	/*
+	 * Maps the physical address into the EPT map.
+	 * Returns the physical address of the EPT entry describing this page
+	 */
+	int pml4index = 0;
+	int pagedirptrindex = 0;
+	int pagedirindex = 0;
+	int pagetableindex = 0;
+	QWORD PA = 0;
 
-QWORD EPTMapPhysicalMemory(pcpuinfo currentcpuinfo, QWORD physicalAddress, int forcesmallpage)
-/*
- * Maps the physical address into the EPT map.
- * Returns the physical address of the EPT entry describing this page
- */
-{
-  int pml4index;
-  int pagedirptrindex;
-  int pagedirindex;
-  int pagetableindex;
-  QWORD PA;
-  VirtualAddressToIndexes(physicalAddress, &pml4index, &pagedirptrindex, &pagedirindex, &pagetableindex);
+	VirtualAddressToIndexes(physicalAddress, &pml4index, &pagedirptrindex, &pagedirindex, &pagetableindex);
 
+	PEPT_PML4E pml4 = NULL;
+	PEPT_PDPTE pagedirptr = NULL;
+	PEPT_PDE pagedir = NULL;
+	PEPT_PTE pagetable = NULL;
 
-  PEPT_PML4E pml4=NULL;
-  PEPT_PDPTE pagedirptr=NULL;
-  PEPT_PDE pagedir=NULL;
-  PEPT_PTE pagetable=NULL;
+	csEnter(&currentcpuinfo->EPTPML4CS);
 
-  csEnter(&currentcpuinfo->EPTPML4CS);
+	if (currentcpuinfo->eptUpdated) {
+		ept_invalidate();
+	}
 
-  if (currentcpuinfo->eptUpdated)
-    ept_invalidate();
-
-
-  pml4=mapPhysicalMemory(currentcpuinfo->EPTPML4, 4096);
+	pml4 = mapPhysicalMemory(currentcpuinfo->EPTPML4, 4096);
 #ifdef EPTINTEGRITY
-  checkpage((PEPT_PTE)pml4);
+	checkpage((PEPT_PTE)pml4);
 #endif
 
-  if (pml4[pml4index].RA==0)
-  {
-    sendstringf("allocating pagedirptr\n");
-    //allocate a pagedirptr table
-    void *temp=malloc2(4096);
-    zeromemory(temp,4096);
-    *(QWORD*)(&pml4[pml4index])=VirtualToPhysical(temp) & MAXPHYADDRMASKPB;
-    pml4[pml4index].RA=1;
-    pml4[pml4index].WA=1;
-    pml4[pml4index].XA=1;
+	if (pml4[pml4index].RA == 0) {
+		sendstringf("INF: allocating pagedirptr\n");
+		//allocate a pagedirptr table
+		void *temp = malloc2(4096);
+		zeromemory(temp, 4096);
+		*(QWORD*)(&pml4[pml4index]) = VirtualToPhysical(temp) & MAXPHYADDRMASKPB;
+
+		pml4[pml4index].RA = 1;
+		pml4[pml4index].WA = 1;
+		pml4[pml4index].XA = 1;
 
 #ifdef EPTINTEGRITY
-    checkpage((PEPT_PTE)temp);
+		checkpage((PEPT_PTE)temp);
 #endif
-  }
+	}
 
-  PA=(*(QWORD*)(&pml4[pml4index])) & MAXPHYADDRMASKPB;
-  pagedirptr=mapPhysicalMemory(PA, 4096);
+	PA = (*(QWORD*)(&pml4[pml4index])) & MAXPHYADDRMASKPB;
+	pagedirptr = mapPhysicalMemory(PA, 4096);
 #ifdef EPTINTEGRITY
-  checkpage((PEPT_PTE)pagedirptr);
+	checkpage((PEPT_PTE)pagedirptr);
 #endif
 
-  PA+=8*pagedirptrindex;
+	PA += 8 * pagedirptrindex;
 
-  if (pml4)
-  {
+	if (pml4) {
 #ifdef EPTINTEGRITY
-    checkpage((PEPT_PTE)pml4);
+		checkpage((PEPT_PTE)pml4);
 #endif
-    unmapPhysicalMemory(pml4, 4096);
-    pml4=NULL;
-  }
+		unmapPhysicalMemory(pml4, 4096);
+		pml4 = NULL;
+	}
 
-  if (forcesmallpage && pagedirptr[pagedirptrindex].RA && (pagedirptr[pagedirptrindex].BIG)) //it's a big page, so the physical address points to the actual memory. Clear everything
-    *(QWORD *)&pagedirptr[pagedirptrindex]=0;
+	if (forcesmallpage && pagedirptr[pagedirptrindex].RA && (pagedirptr[pagedirptrindex].BIG)) { //it's a big page, so the physical address points to the actual memory. Clear everything
+		*(QWORD*) &pagedirptr[pagedirptrindex] = 0;
+	}
 
-  if (pagedirptr[pagedirptrindex].RA==0)
-  {
-    //check if there is a MTRR in this 1GB range that doesn't set the MTRRDefType.TYPE, if not, map as 1GB using deftype
-    if (has_EPT_1GBsupport && (forcesmallpage==0))
-    {
-      QWORD GuestAddress1GBAlign=(physicalAddress & 0xFFFFFFFFC0000000ULL) & MAXPHYADDRMASKPB;
-      int fullmap, memtype;
-      getMTRRMapInfo(GuestAddress1GBAlign,0x40000000, &fullmap, &memtype);
+	if (pagedirptr[pagedirptrindex].RA == 0) {
+		//check if there is a MTRR in this 1GB range that doesn't set the MTRRDefType.TYPE, if not, map as 1GB using deftype
+		if (has_EPT_1GBsupport && (forcesmallpage == 0)) {
+			QWORD GuestAddress1GBAlign = (physicalAddress & 0xFFFFFFFFC0000000ULL) & MAXPHYADDRMASKPB;
+			int fullmap = 0, memtype = 0;
 
-      if (fullmap)
-      {
-        //map as a 1GB page
-        sendstringf("mapping %6 as a 1GB page with memtype %d\n", GuestAddress1GBAlign, memtype);
-        *(QWORD*)(&pagedirptr[pagedirptrindex])=GuestAddress1GBAlign;
-        pagedirptr[pagedirptrindex].RA=1;
-        pagedirptr[pagedirptrindex].WA=1;
-        pagedirptr[pagedirptrindex].XA=1;
-        pagedirptr[pagedirptrindex].BIG=1;
-        pagedirptr[pagedirptrindex].MEMTYPE=memtype;
+			getMTRRMapInfo(GuestAddress1GBAlign,0x40000000, &fullmap, &memtype);
+
+			if (fullmap) {
+				//map as a 1GB page
+				sendstringf("INF: mapping %6 as a 1GB page with memtype %d\n", GuestAddress1GBAlign, memtype);
+				*(QWORD*)(&pagedirptr[pagedirptrindex]) = GuestAddress1GBAlign;
+
+				pagedirptr[pagedirptrindex].RA = 1;
+				pagedirptr[pagedirptrindex].WA = 1;
+				pagedirptr[pagedirptrindex].XA = 1;
+				pagedirptr[pagedirptrindex].BIG = 1;
+				pagedirptr[pagedirptrindex].MEMTYPE = memtype;
 #ifdef EPTINTEGRITY
-        checkpage((PEPT_PTE)pagedirptr);
+				checkpage((PEPT_PTE)pagedirptr);
 #endif
-        unmapPhysicalMemory(pagedirptr, 4096);
+				unmapPhysicalMemory(pagedirptr, 4096);
+				csLeave(&currentcpuinfo->EPTPML4CS);
 
-        csLeave(&currentcpuinfo->EPTPML4CS);
-        return PA;
-      }
-    }
+				return PA;
+			}
+		}
 
-    //still here, try a pagedir
-    void *temp=malloc2(4096);
-    zeromemory(temp,4096);
-    *(QWORD*)(&pagedirptr[pagedirptrindex])=VirtualToPhysical(temp) & MAXPHYADDRMASKPB;
-    pagedirptr[pagedirptrindex].RA=1;
-    pagedirptr[pagedirptrindex].WA=1;
-    pagedirptr[pagedirptrindex].XA=1;
-  }
+		//still here, try a pagedir
+		void *temp = malloc2(4096);
+		zeromemory(temp, 4096);
+		*(QWORD*)(&pagedirptr[pagedirptrindex])=VirtualToPhysical(temp) & MAXPHYADDRMASKPB;
+		pagedirptr[pagedirptrindex].RA = 1;
+		pagedirptr[pagedirptrindex].WA = 1;
+		pagedirptr[pagedirptrindex].XA = 1;
+	}
 
-  PA=(*(QWORD*)(&pagedirptr[pagedirptrindex])) & MAXPHYADDRMASKPB;
-  pagedir=mapPhysicalMemory(PA, 4096);
+	PA = (*(QWORD*)(&pagedirptr[pagedirptrindex])) & MAXPHYADDRMASKPB;
+	pagedir = mapPhysicalMemory(PA, 4096);
 
 #ifdef EPTINTEGRITY
-  checkpage((PEPT_PTE)pagedir);
+	checkpage((PEPT_PTE)pagedir);
 #endif
 
-  PA+=8*pagedirindex;
+	PA += 8 * pagedirindex;
 
-  if (pagedirptr)
-  {
+	if (pagedirptr) {
 #ifdef EPTINTEGRITY
-    checkpage((PEPT_PTE)pagedirptr);
+		checkpage((PEPT_PTE)pagedirptr);
 #endif
-    unmapPhysicalMemory(pagedirptr, 4096);
-    pagedirptr=NULL;
-  }
+		unmapPhysicalMemory(pagedirptr, 4096);
+		pagedirptr = NULL;
+	}
 
-  if (forcesmallpage && pagedir[pagedirindex].RA && (pagedir[pagedirindex].BIG)) //it's a big page, so the physical address points to the actual memory. Clear everything
-    *(QWORD *)&pagedir[pagedirindex]=0;
+	if (forcesmallpage && pagedir[pagedirindex].RA && (pagedir[pagedirindex].BIG)) { //it's a big page, so the physical address points to the actual memory. Clear everything
+		*(QWORD*)&pagedir[pagedirindex] = 0;
+	}
 
+	if (pagedir[pagedirindex].RA == 0) {
+		if (has_EPT_2MBSupport && (forcesmallpage == 0)) {
+			QWORD GuestAddress2MBAlign = (physicalAddress & 0xFFFFFFFFFFE00000ULL) & MAXPHYADDRMASKPB;
+			int memtype = 0, fullmap = 0;
+			getMTRRMapInfo(GuestAddress2MBAlign, 0x200000, &fullmap, &memtype);
 
-  if (pagedir[pagedirindex].RA==0)
-  {
-    if (has_EPT_2MBSupport && (forcesmallpage==0))
-    {
-      QWORD GuestAddress2MBAlign=(physicalAddress & 0xFFFFFFFFFFE00000ULL) & MAXPHYADDRMASKPB;
-      int memtype, fullmap;
-      getMTRRMapInfo(GuestAddress2MBAlign,0x200000, &fullmap, &memtype);
-
-      if (fullmap)
-      {
-        sendstringf("mapping %6 as a 2MB page with memtype %d\n", GuestAddress2MBAlign, memtype);
-        *(QWORD*)(&pagedir[pagedirindex])=GuestAddress2MBAlign & MAXPHYADDRMASKPB;
-        pagedir[pagedirindex].RA=1;
-        pagedir[pagedirindex].WA=1;
-        pagedir[pagedirindex].XA=1;
-        pagedir[pagedirindex].BIG=1;
-        pagedir[pagedirindex].MEMTYPE=memtype;
+			if (fullmap) {
+				sendstringf("INF: mapping %6 as a 2MB page with memtype %d\n", GuestAddress2MBAlign, memtype);
+				*(QWORD*)(&pagedir[pagedirindex]) = GuestAddress2MBAlign & MAXPHYADDRMASKPB;
+				pagedir[pagedirindex].RA = 1;
+				pagedir[pagedirindex].WA = 1;
+				pagedir[pagedirindex].XA = 1;
+				pagedir[pagedirindex].BIG = 1;
+				pagedir[pagedirindex].MEMTYPE = memtype;
 #ifdef EPTINTEGRITY
-        checkpage((PEPT_PTE)pagedir);
+				checkpage((PEPT_PTE)pagedir);
 #endif
-        unmapPhysicalMemory(pagedir, 4096);
+				unmapPhysicalMemory(pagedir, 4096);
+				csLeave(&currentcpuinfo->EPTPML4CS);
 
-        csLeave(&currentcpuinfo->EPTPML4CS);
-        return PA;
-      }
-    }
+				return PA;
+			}
+		}
 
-    //still here, try a pagetable
-    void *temp=malloc2(4096);
-    zeromemory(temp,4096);
-    *(QWORD*)(&pagedir[pagedirindex])=VirtualToPhysical(temp) & MAXPHYADDRMASKPB;
-    pagedir[pagedirindex].RA=1;
-    pagedir[pagedirindex].WA=1;
-    pagedir[pagedirindex].XA=1;
-  }
+		//still here, try a pagetable
+		void *temp = malloc2(4096);
+		zeromemory(temp, 4096);
+		*(QWORD*)(&pagedir[pagedirindex]) = VirtualToPhysical(temp) & MAXPHYADDRMASKPB;
 
-  //still here, so not mapped as a pagedir entry
-  PA=(*(QWORD*)(&pagedir[pagedirindex])) & MAXPHYADDRMASKPB;
-  pagetable=mapPhysicalMemory(PA, 4096);
+		pagedir[pagedirindex].RA = 1;
+		pagedir[pagedirindex].WA = 1;
+		pagedir[pagedirindex].XA = 1;
+	}
+
+	//still here, so not mapped as a pagedir entry
+	PA = (*(QWORD*)(&pagedir[pagedirindex])) & MAXPHYADDRMASKPB;
+	pagetable = mapPhysicalMemory(PA, 4096);
 #ifdef EPTINTEGRITY
-  checkpage((PEPT_PTE)pagetable);
+	checkpage((PEPT_PTE)pagetable);
 #endif
 
-  PA+=8*pagetableindex;
+	PA += 8 * pagetableindex;
 
-  if (pagedir)
-  {
+	if (pagedir) {
 #ifdef EPTINTEGRITY
-    checkpage((PEPT_PTE)pagedir);
+		checkpage((PEPT_PTE)pagedir);
 #endif
-    unmapPhysicalMemory(pagedir,4096);
-    pagedir=NULL;
-  }
+		unmapPhysicalMemory(pagedir, 4096);
+		pagedir = NULL;
+	}
 
-  if (pagetable[pagetableindex].RA==0)
-  {
-    int memtype, fullmap;
-    getMTRRMapInfo(physicalAddress & MAXPHYADDRMASKPB,0x1000, &fullmap, &memtype);
-    if (!fullmap)
-    {
-      nosendchar[getAPICID()]=0;
-      sendstring("Assertion Fail: fullmap is false for a 1 page range");
-      ddDrawRectangle(0,DDVerticalResolution-100,100,100,0xff0000);
-      while (1) outportb(0x80,0xc3);
-    }
+	if (pagetable[pagetableindex].RA == 0) {
+		int memtype = 0, fullmap = 0;
 
-   //memtype=0;
+		getMTRRMapInfo(physicalAddress & MAXPHYADDRMASKPB, 0x1000, &fullmap, &memtype);
+		if (!fullmap) {
+			nosendchar[getAPICID()] = 0;
+			sendstring("INF: Assertion Fail: fullmap is false for a 1 page range");
 
-    //sendstringf("mapping %6 as a 4KB page with memtype %d\n", physicalAddress & MAXPHYADDRMASKPB, memtype);
-    *(QWORD*)(&pagetable[pagetableindex])=physicalAddress & MAXPHYADDRMASKPB;
-    pagetable[pagetableindex].RA=1;
-    pagetable[pagetableindex].WA=1;
-    pagetable[pagetableindex].XA=1;
-    pagetable[pagetableindex].MEMTYPE=memtype;
-  }
-  else
-  {
-    //else already mapped
-    //sendstringf("This physical address (%6) was already mapped\n", physicalAddress);
+			ddDrawRectangle(0, DDVerticalResolution - 100, 100, 100, 0xff0000);
+			while (1) {
+				outportb(0x80, 0xc3);
+			}
+		}
 
-    //change it to full access
-    pagetable[pagetableindex].RA=1;
-    pagetable[pagetableindex].WA=1;
-    pagetable[pagetableindex].XA=1;
-  }
+		//memtype=0;
+		//sendstringf("mapping %6 as a 4KB page with memtype %d\n", physicalAddress & MAXPHYADDRMASKPB, memtype);
+		*(QWORD*)(&pagetable[pagetableindex]) = physicalAddress & MAXPHYADDRMASKPB;
+
+		pagetable[pagetableindex].RA = 1;
+		pagetable[pagetableindex].WA = 1;
+		pagetable[pagetableindex].XA = 1;
+		pagetable[pagetableindex].MEMTYPE = memtype;
+	} else {
+		//else already mapped
+		//sendstringf("This physical address (%6) was already mapped\n", physicalAddress);
+
+		//change it to full access
+		pagetable[pagetableindex].RA = 1;
+		pagetable[pagetableindex].WA = 1;
+		pagetable[pagetableindex].XA = 1;
+	}
 #ifdef EPTINTEGRITY
-  checkpage((PEPT_PTE)pagetable);
+	checkpage((PEPT_PTE)pagetable);
 #endif
-  unmapPhysicalMemory(pagetable,4096);
+	unmapPhysicalMemory(pagetable, 4096);
+	csLeave(&currentcpuinfo->EPTPML4CS);
 
-  csLeave(&currentcpuinfo->EPTPML4CS);
-
-  return PA;
+	return PA;
 }
 
-VMSTATUS handleEPTViolation(pcpuinfo currentcpuinfo, VMRegisters *vmregisters UNUSED, PFXSAVE64 fxsave UNUSED)
-{
-  //EPT_VIOLATION_INFO vi;
-  sendstring("handleEPTViolation\n");
+VMSTATUS handleEPTViolation(pcpuinfo currentcpuinfo, VMRegisters *vmregisters UNUSED, PFXSAVE64 fxsave UNUSED) {
+	//EPT_VIOLATION_INFO vi;
+	sendstring("INF: handleEPTViolation\n");
 
+	VMExit_idt_vector_information idtvectorinfo;
+	idtvectorinfo.idtvector_info = vmread(vm_idtvector_information);
 
-  VMExit_idt_vector_information idtvectorinfo;
-  idtvectorinfo.idtvector_info=vmread(vm_idtvector_information);
+	if (idtvectorinfo.valid) {
+		//handle this EPT event and reinject the interrupt
+		VMEntry_interruption_information newintinfo;
+		newintinfo.interruption_information = 0;
 
-  if (idtvectorinfo.valid)
-  {
-    //handle this EPT event and reinject the interrupt
-    VMEntry_interruption_information newintinfo;
-    newintinfo.interruption_information=0;
+		newintinfo.interruptvector = idtvectorinfo.interruptvector;
+		newintinfo.type = idtvectorinfo.type;
+		newintinfo.haserrorcode = idtvectorinfo.haserrorcode;
+		newintinfo.valid = idtvectorinfo.valid; //should be 1...
+		vmwrite(vm_entry_exceptionerrorcode, vmread(vm_idtvector_error)); //entry errorcode
+		vmwrite(vm_entry_interruptioninfo, newintinfo.interruption_information); //entry info field
+		vmwrite(vm_entry_instructionlength, vmread(vm_exit_instructionlength)); //entry instruction length
+	} else {
+		//problem: on intel this will set RF to 1.  So the handleWatchEvent cannot distinguish a resuming dbvmbp
+		//solution: use a "skip next watchevent" for this cpu
+	}
 
-    newintinfo.interruptvector=idtvectorinfo.interruptvector;
-    newintinfo.type=idtvectorinfo.type;
-    newintinfo.haserrorcode=idtvectorinfo.haserrorcode;
-    newintinfo.valid=idtvectorinfo.valid; //should be 1...
-    vmwrite(vm_entry_exceptionerrorcode, vmread(vm_idtvector_error)); //entry errorcode
-    vmwrite(vm_entry_interruptioninfo, newintinfo.interruption_information); //entry info field
-    vmwrite(vm_entry_instructionlength, vmread(vm_exit_instructionlength)); //entry instruction length
-  }
-  else
-  {
-    //problem: on intel this will set RF to 1.  So the handleWatchEvent cannot distinguish a resuming dbvmbp
-    //solution: use a "skip next watchevent" for this cpu
-  }
+	//vi.ExitQualification=vmread(vm_exit_qualification);
+	QWORD GuestAddress = vmread(vm_guest_physical_address);
+	QWORD GuestAddressVA = vmread(vm_guest_linear_address);
 
- //vi.ExitQualification=vmread(vm_exit_qualification);
+	if (ept_handleWatchEvent(currentcpuinfo, vmregisters, fxsave, GuestAddress)) {
+		return 0;
+	}
+	//check for cloak
+	if (ept_handleCloakEvent(currentcpuinfo, GuestAddress, GuestAddressVA)) {
+		return 0;
+	}
 
-  QWORD GuestAddress=vmread(vm_guest_physical_address);
-  QWORD GuestAddressVA=vmread(vm_guest_linear_address);
+	//still here, so not a watch or cloak
+	sendstringf("INF: Mapping %6\n", GuestAddress);
+	EPTMapPhysicalMemory(currentcpuinfo, GuestAddress, 0);
 
-
-  if (ept_handleWatchEvent(currentcpuinfo, vmregisters, fxsave, GuestAddress))
-    return 0;
-
-
-
-  //check for cloak
-  if (ept_handleCloakEvent(currentcpuinfo, GuestAddress, GuestAddressVA))
-    return 0;
-
-  //still here, so not a watch or cloak
-  sendstringf("Mapping %6\n", GuestAddress);
-  EPTMapPhysicalMemory(currentcpuinfo, GuestAddress, 0);
-
-  return 0;
-
+	return 0;
 }
 
-VMSTATUS handleEPTMisconfig(pcpuinfo currentcpuinfo UNUSED, VMRegisters *vmregisters UNUSED)
-{
-  nosendchar[getAPICID()]=0;
-  sendstring("handleEPTMisconfig\n");
-  //could have been a timing misconfig, try again
+VMSTATUS handleEPTMisconfig(pcpuinfo currentcpuinfo UNUSED, VMRegisters *vmregisters UNUSED) {
+	nosendchar[getAPICID()] = 0;
+	sendstring("INF: handleEPTMisconfig\n");
+	//could have been a timing misconfig, try again
 
-  VMExit_idt_vector_information idtvectorinfo;
-  idtvectorinfo.idtvector_info=vmread(vm_idtvector_information);
-  if (idtvectorinfo.valid)
-  {
-    //handle this EPT event and reinject the interrupt
-    VMEntry_interruption_information newintinfo;
-    newintinfo.interruption_information=0;
+	VMExit_idt_vector_information idtvectorinfo;
+	idtvectorinfo.idtvector_info = vmread(vm_idtvector_information);
 
-    newintinfo.interruptvector=idtvectorinfo.interruptvector;
-    newintinfo.type=idtvectorinfo.type;
-    newintinfo.haserrorcode=idtvectorinfo.haserrorcode;
-    newintinfo.valid=idtvectorinfo.valid; //should be 1...
-    vmwrite(vm_entry_exceptionerrorcode, vmread(vm_idtvector_error)); //entry errorcode
-    vmwrite(vm_entry_interruptioninfo, newintinfo.interruption_information); //entry info field
-    vmwrite(0x401a, vmread(vm_exit_instructionlength)); //entry instruction length
-    return VM_OK;
-  }
+	if (idtvectorinfo.valid) {
+		//handle this EPT event and reinject the interrupt
+		VMEntry_interruption_information newintinfo;
+		newintinfo.interruption_information = 0;
 
-  /*
-  QWORD GuestAddress=vmread(vm_guest_physical_address);
-  QWORD EPTAddress=EPTMapPhysicalMemory(currentcpuinfo, GuestAddress, 0);
+		newintinfo.interruptvector = idtvectorinfo.interruptvector;
+		newintinfo.type = idtvectorinfo.type;
+		newintinfo.haserrorcode = idtvectorinfo.haserrorcode;
+		newintinfo.valid = idtvectorinfo.valid; //should be 1...
+		vmwrite(vm_entry_exceptionerrorcode, vmread(vm_idtvector_error)); //entry errorcode
+		vmwrite(vm_entry_interruptioninfo, newintinfo.interruption_information); //entry info field
+		vmwrite(0x401a, vmread(vm_exit_instructionlength)); //entry instruction length
+		return VM_OK;
+	}
 
-  if (EPTAddress)
-  {
-    sendstringf("handleEPTMisconfig(%x) : %6\n",GuestAddress, EPTAddress);
-  }
-  else
-  {
-    sendstringf("handleEPTMisconfig(%x) : fuck\n", GuestAddress);
-  }*/
+	/*
+	   QWORD GuestAddress=vmread(vm_guest_physical_address);
+	   QWORD EPTAddress=EPTMapPhysicalMemory(currentcpuinfo, GuestAddress, 0);
 
-  return 0; //try again
-  //while (1) outportb(0x80,0xe0);
+	   if (EPTAddress)
+	   {
+	   sendstringf("handleEPTMisconfig(%x) : %6\n",GuestAddress, EPTAddress);
+	   }
+	   else
+	   {
+	   sendstringf("handleEPTMisconfig(%x) : fuck\n", GuestAddress);
+	   }*/
 
-  return VM_ERROR;
+	return 0; //try again
+			  //while (1) outportb(0x80,0xe0);
+
+	return VM_ERROR;
 }
 
