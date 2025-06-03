@@ -950,122 +950,101 @@ void vmcalltest(void) {
 }
 //#pragma GCC pop_options
 
-// TODO: leaving off here...
 void apentryvmx() {
-  nosendchar[getAPICID()]=0;
- // sendstringf("Hello from %d", getAPICID());
+	nosendchar[getAPICID()] = 0;
+	// sendstringf("Hello from %d", getAPICID());
 
-  while (1)
-  {
-   // sendchar("-");
-    QWORD eax,ebx,ecx,edx;
-    _cpuid(&eax,&ebx,&ecx,&edx);
-
-
-  }
-
+	while (1) {
+		// sendchar("-");
+		QWORD eax,ebx,ecx,edx;
+		_cpuid(&eax, &ebx, &ecx, &edx);
+	}
 }
 
-void reboot(int skipAPTerminationWait)
-{
-  {
-    //remapping pagetable entry 0 to 0x00400000 so it's writabe (was marked unwritable after entry)
-    PPDPTE_PAE pml4entry;
-    PPDPTE_PAE pagedirpointerentry;
-    PPDE_PAE pagedirentry;
-    PPTE_PAE pagetableentry;
+void reboot(int skipAPTerminationWait) {
+	{
+		//remapping pagetable entry 0 to 0x00400000 so it's writabe (was marked unwritable after entry)
+		PPDPTE_PAE pml4entry;
+		PPDPTE_PAE pagedirpointerentry;
+		PPDE_PAE pagedirentry;
+		PPTE_PAE pagetableentry;
 
-    VirtualAddressToPageEntries(0, &pml4entry, &pagedirpointerentry, &pagedirentry, &pagetableentry);
-    pagedirentry[0].RW=1;
-    pagedirentry[1].RW=1;
-    asm volatile ("": : :"memory");
-  }
+		VirtualAddressToPageEntries(0, &pml4entry, &pagedirpointerentry, &pagedirentry, &pagetableentry);
+		pagedirentry[0].RW = 1;
+		pagedirentry[1].RW = 1;
+		asm volatile ("": : :"memory");
+	}
 
-  //Disable the AP cpu's as on a normal reboot, the memory they are looping in will first be zeroed out (it picks the same memory block)
-  AP_Terminate=1; //tells the AP cpu's to stop
+	//Disable the AP cpu's as on a normal reboot, the memory they are looping in will first be zeroed out (it picks the same memory block)
+	AP_Terminate = 1; //tells the AP cpu's to stop
 
-  if (skipAPTerminationWait==0) //can be skipped if ran by vmlaunch (the other cpu's will stay active as they are in wait-for-sipi mode)
-  {
-    startNextCPU(); //just make sure there is none waiting
+	if (skipAPTerminationWait == 0) { //can be skipped if ran by vmlaunch (the other cpu's will stay active as they are in wait-for-sipi mode)
+		startNextCPU(); //just make sure there is none waiting
 
-    int stillactive=1;
-    while (stillactive)
-    {
-      pcpuinfo c=firstcpuinfo->next;
-      stillactive=0;
-      while (c)
-      {
-        if ((c->vmxsetup==0) && (c->active)) //not configured to be a VMX, and still active
-          stillactive=1;
+		int stillactive = 1;
 
-        c=c->next;
-      }
-    }
-  }
+		while (stillactive) {
+			pcpuinfo c = firstcpuinfo->next;
+			stillactive = 0;
 
-  UINT64 gdtaddress=getGDTbase();  //0x40002 contains the address of the GDT table
+			while (c) {
+				if ((c->vmxsetup == 0) && (c->active)) { //not configured to be a VMX, and still active
+					stillactive = 1;
+				}
+				c = c->next;
+			}
+		}
+	}
 
-  sendstring("Copying gdt to low memory\n\r");
-  copymem((void *)0x50000,(void *)(UINT64)gdtaddress,128); //copy gdt to 0x50000
+	UINT64 gdtaddress = getGDTbase();  //0x40002 contains the address of the GDT table
 
-  sendstring("copying movetoreal to 0x2000\n\r");
-  copymem((void *)0x20000,(void *)(UINT64)&movetoreal,(UINT64)&vmxstartup_end-(UINT64)&movetoreal);
+	sendstring("INF: Copying gdt to low memory\n\r");
+	copymem((void*)0x50000, (void*)(UINT64)gdtaddress, 128); //copy gdt to 0x50000
 
+	sendstring("INF: copying movetoreal to 0x2000\n\r");
+	copymem((void*)0x20000, (void*)(UINT64)&movetoreal, (UINT64)&vmxstartup_end - (UINT64)&movetoreal);
 
-  sendstring("Calling quickboot\n\r");
+	sendstring("INF: Calling quickboot\n\r");
 
-  if (skipAPTerminationWait==0xcedead) //PSOD
-    *(unsigned char *)0x7c0e=0xff;
-  else
-    *(unsigned char *)0x7c0e=bootdisk;
+	if (skipAPTerminationWait == 0xcedead) { //PSOD
+		*(unsigned char*)0x7c0e = 0xff;
+	} else {
+		*(unsigned char*)0x7c0e = bootdisk;
+	}
 
-
-
-  quickboot();
-  sendstring("WTF?\n\r");
+	quickboot();
+	sendstring("WTF?\n\r");
 }
 
 
 #ifdef DEBUG
 #define SHOWFIRSTMENU 1
-int showfirstmenu=1;
+int showfirstmenu = 1;
 #else
 #define SHOWFIRSTMENU 0
-int showfirstmenu=0;
+int showfirstmenu = 0;
 #endif
 
-void menu2(void)
-{
-  unsigned char key;
+void menu2(void) {
+  unsigned char key = 0;
 
-
-
-
-
-  sendstringf("loadedOS=%6\n",loadedOS);
-
+  sendstringf("INF: loadedOS=%6\n",loadedOS);
 
   //*(BYTE *)0x7c0e=0x80;
-  bootdisk=0x80;
-  while (1)
-  {
+  bootdisk = 0x80;
+  while (1) {
     clearScreen();
-    currentdisplayline=0;
+    currentdisplayline = 0;
 
-    {
-    	vmcb x;
-    	int offset;
+	{
+		vmcb x;
+		int offset = 0;
 
-    	offset=(QWORD)&x.DR6-(QWORD)&x;
+		offset = (QWORD)&x.DR6 - (QWORD)&x;
+		displayline("INF: DR6=%x\n", offset);
+	}
 
-
-        	displayline("DR6=%x\n", offset);
-
-
-    }
-
-    displayline("Welcome to the DBVM interactive menu\n\n");
-    displayline("These are your options:\n");
+    displayline("Welcome to the interactive menu\n\n");
     displayline("0: Start virtualization\n");
     displayline("1: Keyboard test\n");
     displayline("2: Set disk to startup from (currently %2)\n",bootdisk);
@@ -1083,8 +1062,7 @@ void menu2(void)
     displayline("o: out of memory test\n");
     displayline("n: NMI Test\n");
 
-    if (getDBVMVersion())
-    {
+    if (getDBVMVersion()) {
       displayline("w: DBVM write watch test\n");
       displayline("r: DBVM write read/write test\n");
       displayline("x: DBVM write execute test\n");
@@ -1092,407 +1070,365 @@ void menu2(void)
       displayline("m: DBVM changeregonbp test\n");
     }
 
-
-    key=0;
-    while (!key)
-    {
-
-      if ((!loadedOS) || (showfirstmenu))
-      {
+    key = 0;
+    while (!key) {
+      if ((!loadedOS) || (showfirstmenu)) {
 #ifdef DELAYEDSERIAL
-        if (!useserial)
+        if (!useserial) {
           key='0';
+		}
         else
 #endif
-        if (loadedOS)
+        if (loadedOS) {
           key=waitforchar();
-        else
+		} else {
           key=kbd_getchar();
-      }
-      else
-        key='0';
+		}
+      } else {
+		  key = '0';
+	  }
 
-      while (IntHandlerDebug) ;
+      while (IntHandlerDebug);
 
-      if (key)
-      {
+      if (key) {
         char temps[16];
         displayline("%c\n", key);
 
-        switch (key)
-        {
+        switch (key) {
           case '0':
-            clearScreen();
-            menu();
-            break;
-
+			  {
+				  clearScreen();
+				  menu();
+				  break;
+			  }
           case '1':
-            displayline("kdbstatus=%2\n",kbd_getstatus());
-            displayline("kdb_getoutputport=%2\n",kdb_getoutputport());
-            displayline("kdb_getinputport=%2\n",kdb_getinputport());
-            displayline("kdb_getcommandbyte=%2\n",kdb_getcommandbyte());
-            break;
-
+			  {
+				  displayline("kdbstatus=%2\n",kbd_getstatus());
+				  displayline("kdb_getoutputport=%2\n",kdb_getoutputport());
+				  displayline("kdb_getinputport=%2\n",kdb_getinputport());
+				  displayline("kdb_getcommandbyte=%2\n",kdb_getcommandbyte());
+				  break;
+			  }
           case '2':
-            displayline("Set the new drive: ");
-            readstringc(temps,2,16);
-            temps[15]=0;
+			  {
+				  displayline("Set the new drive: ");
+				  readstringc(temps,2,16);
+				  temps[15]=0;
 
-            bootdisk=atoi2(temps,16,NULL);
-            displayline("\nNew drive=%2 \n",bootdisk);
-            break;
-
+				  bootdisk=atoi2(temps,16,NULL);
+				  displayline("\nNew drive=%2 \n",bootdisk);
+				  break;
+			  }
           case '3': //disassemblerr
-            {
-              _DecodedInst disassembled[22];
-              unsigned int i;
-              unsigned int used=0;
-              distorm_decode((UINT64)&menu2,(unsigned char*)menu2, 256, Decode64Bits, disassembled, 22, &used);
+			  {
+				  _DecodedInst disassembled[22];
+				  unsigned int i = 0;
+				  unsigned int used = 0;
+				  distorm_decode((UINT64)&menu2,(unsigned char*)menu2, 256, Decode64Bits, disassembled, 22, &used);
 
-              if (used)
-              {
-                for (i=0; i<used; i++)
-                {
-                  displayline("%x : %s - %s %s\n",
-                    disassembled[i].offset,
-                    disassembled[i].instructionHex.p,
-                    disassembled[i].mnemonic.p,
-                    disassembled[i].operands.p);
-                }
-
-              }
-              else
-              {
-                displayline("Failure...\n");
-              }
-
-
-            }
+				  if (used) {
+					  for (; i < used; i++) {
+						  displayline("%x : %s - %s %s\n",
+								  disassembled[i].offset,
+								  disassembled[i].instructionHex.p,
+								  disassembled[i].mnemonic.p,
+								  disassembled[i].operands.p);
+					  }
+				  } else {
+					  displayline("Failure...\n");
+				  }
+			  }
             break;
 
           case '4':
-          {
-            __asm("sti"); //enable interrupts
-            break;
-          }
+			{
+				__asm("sti"); //enable interrupts
+				break;
+			}
 
           case '5':
-          {
-            UINT64 rflags;
-            pcpuinfo i=getcpuinfo();
+			{
+				UINT64 rflags = 0;
+				pcpuinfo i = getcpuinfo();
 
-            ClearDR6OnInterrupt=1;
+				ClearDR6OnInterrupt = 1;
+				try {
+					displayline("INF: Doing an int3 bp\n");
+					int3bptest();
+					displayline("ERR: Failure to int3 break\n");
+				} except {
+					displayline("INF: caught level 1 int3 :%d\n", lastexception);
+				}
+				tryend;
 
+				try {
+					displayline("INF: Doing an int3 bp 2\n");
+					int3bptest();
+					displayline("INF: Failure to int3 break 2\n");
+				} except {
+					displayline("ERR: caught level 1 int 3 2:%d\n", lastexception);
+				}
+				tryend;
 
+				displayline("INF: testing multilevel try/except\n");
+				try {
+					displayline("INF: inside try. Entering 2nd try\n");
+					try {
+						displayline("INF: inside 2nd try. calling int3bptest\n");
+						int3bptest();
+						displayline("ERR: int3bptest in level 2 failed to get caught\n");
+					} except {
+						displayline("INF: caught level 2 int3:%d\n", lastexception);
+					}
+					tryend;
 
-            try
-            {
-              displayline("Doing an int3 bp\n");
-              int3bptest();
-              displayline("Failure to int3 break\n");
-            }
-            except
-            {
-              displayline("caught level 1 int3 :%d\n", lastexception);
-            }
-            tryend
+					int3bptest();
+					displayline("ERR: Failure to int3 break\n");
+				} except {
+					displayline("INF: caught level 1 int3:%d\n", lastexception);
+				}
+				tryend;
 
-            try
-            {
-              displayline("Doing an int3 bp 2\n");
-              int3bptest();
-              displayline("Failure to int3 break 2\n");
-            }
-            except
-            {
-              displayline("caught level 1 int 3 2:%d\n", lastexception);
-            }
-            tryend
+				displayline("INF: Setting the GD flag");
 
+				i->OnInterrupt.RSP = getRSP();
+				i->OnInterrupt.RBP = getRBP();
+				i->OnInterrupt.RIP = (QWORD)((volatile void*)&&afterGDtest);
 
-            displayline("testing multilevel try/except\n");
-            try
-            {
-              displayline("inside try. Entering 2nd try\n");
-              try
-              {
-                displayline("inside 2nd try. calling int3bptest\n");
-                int3bptest();
-                displayline("int3bptest in level 2 failed to get caught\n");
-              }
-              except
-              {
-                displayline("caught level 2 int3:%d\n", lastexception);
-              }
-              tryend
+				asm volatile ("": : :"memory");
+				setDR6(0xffffffff);
+				setDR7(getDR7() | (1 << 13));
+				asm volatile ("": : :"memory");
+				setDR3(0x12345678);
 
-              int3bptest();
-              displayline("Failure to int3 break\n");
-            }
-            except
-            {
-              displayline("caught level 1 int3:%d\n", lastexception);
-            }
-            tryend
-
-            displayline("Setting the GD flag");
-
-            i->OnInterrupt.RSP=getRSP();
-            i->OnInterrupt.RBP=getRBP();
-            i->OnInterrupt.RIP=(QWORD)((volatile void *)&&afterGDtest);
-            asm volatile ("": : :"memory");
-            setDR6(0xffffffff);
-            setDR7(getDR7() | (1<<13));
-            asm volatile ("": : :"memory");
-            setDR3(0x12345678);
-
-            sendstringf("Failure to break on GD");
-
-            asm volatile ("": : :"memory");
+				sendstringf("ERR: Failure to break on GD");
+				asm volatile ("": : :"memory");
 afterGDtest:
+				//RF
+				sendstringf("INF: After GD test. DR6=%6\n", getDR6());
+				displayline("INF: Setting an execute breakpoint\n\r");
 
-            //RF
-            sendstringf("After GD test. DR6=%6\n", getDR6());
+				setDR0((QWORD)getCR0);
+				setDR6(0xffff0ff0);
+				setDR7(getDR7() | (1 << 0));
+				displayline("INF: Going to execute it\n");
 
+				i->OnInterrupt.RSP = getRSP();
+				i->OnInterrupt.RBP = getRBP();
+				i->OnInterrupt.RIP = (QWORD)((volatile void*)&&afterEXBPtest);
+				asm volatile ("": : :"memory");
+				getCR0();
 
-            displayline("Setting an execute breakpoint\n\r");
-            setDR0((QWORD)getCR0);
-            setDR6(0xffff0ff0);
-            setDR7(getDR7() | (1<<0));
-            displayline("Going to execute it\n");
-
-            i->OnInterrupt.RSP=getRSP();
-            i->OnInterrupt.RBP=getRBP();
-            i->OnInterrupt.RIP=(QWORD)((volatile void *)&&afterEXBPtest);
-            asm volatile ("": : :"memory");
-            getCR0();
-
-            sendstringf("Failure to break on execute\n");
-            asm volatile ("": : :"memory");
+				sendstringf("ERR: Failure to break on execute\n");
+				asm volatile ("": : :"memory");
 afterEXBPtest:
 
-            displayline("Setting a RW breakpoint\n\r");
-            setDR0((QWORD)&isAP);
-            setDR6(0xffff0ff0);
-            setDR7(getDR7() | (3<<18) | (3<<16) | (1<<0));
-            displayline("Going to write to that breakpoint\n");
+				displayline("INF: Setting a RW breakpoint\n\r");
 
-            i->OnInterrupt.RSP=getRSP();
-            i->OnInterrupt.RBP=getRBP();
-            i->OnInterrupt.RIP=(QWORD)((volatile void *)&&afterWRBPtest);
-            asm volatile ("": : :"memory");
+				setDR0((QWORD)&isAP);
+				setDR6(0xffff0ff0);
+				setDR7(getDR7() | (3 << 18) | (3 << 16) | (1 << 0));
+				displayline("INF: Going to write to that breakpoint\n");
 
-            isAP++;
-            asm volatile ("": : :"memory");
-            sendstringf("Failure to break on write. %d\n", isAP);
+				i->OnInterrupt.RSP = getRSP();
+				i->OnInterrupt.RBP = getRBP();
+				i->OnInterrupt.RIP = (QWORD)((volatile void*)&&afterWRBPtest);
+				asm volatile ("": : :"memory");
+
+				isAP++;
+				asm volatile ("": : :"memory");
+				sendstringf("ERR: Failure to break on write. %d\n", isAP);
 afterWRBPtest:
-            asm volatile ("": : :"memory");
-            displayline("done writing\n");
+				asm volatile ("": : :"memory");
+				displayline("INF: done writing\n");
 
 
-            displayline("Setting the single step flag (this will give unhandled exceptions)\n\r");
-            rflags=getRFLAGS(); //NO RF
-            setRFLAGS(rflags | (1<<8));
+				displayline("INF: Setting the single step flag (this will give unhandled exceptions)\n\r");
+				rflags = getRFLAGS(); //NO RF
+									  //
+				setRFLAGS(rflags | (1 << 8));
+				setRFLAGS(rflags & (~(1 << 8))); //unset
 
-            setRFLAGS(rflags & (~(1<<8))); //unset
-
-            ClearDR6OnInterrupt=0;
-
-
-            break;
-          }
+				ClearDR6OnInterrupt = 0;
+				break;
+			}
 
           case '6':
-          {
-            displayline("Setting the redirects. #UD Interrupt will fire if dbvm is not loaded (and crash)");
-            vmcall_setintredirects();
-
-            break;
-
-          }
+			{
+				displayline("INF: Setting the redirects. #UD Interrupt will fire if dbvm is not loaded (and crash)");
+				vmcall_setintredirects();
+				break;
+			}
 
           case '7':
-          {
-            QWORD cr3=getCR3();
-            displayline("CR3 was %6\n", cr3);
+			{
+				QWORD cr3 = getCR3();
+				displayline("INF: CR3 was %6\n", cr3);
 
-            cr3=cr3&0xfffffffffffff000ULL;
-            setCR3(cr3);
-            setCR4(getCR4() | CR4_PCIDE);
+				cr3 = cr3&0xfffffffffffff000ULL;
+				setCR3(cr3);
+				setCR4(getCR4() | CR4_PCIDE);
 
-            cr3=cr3 | 2;
-            setCR3(cr3);
+				cr3 = cr3 | 2;
+				setCR3(cr3);
 
-            cr3=getCR3();
-            displayline("CR3 is %6\n", cr3);
+				cr3 = getCR3();
+				displayline("INF: CR3 is %6\n", cr3);
 
-            cr3=cr3 | 0x8000000000000000ULL;
-            setCR3(cr3);
-            cr3=getCR3();
-            displayline("CR3 is %6\n", cr3);
+				cr3 = cr3 | 0x8000000000000000ULL;
+				setCR3(cr3);
+				cr3 = getCR3();
 
-            break;
-          }
+				displayline("INF: CR3 is %6\n", cr3);
+				break;
+			}
 
           case '8':
-          {
-            //pci enum test
-            pciConfigEnumPci();
-            break;
-          }
+			{
+				//pci enum test
+				pciConfigEnumPci();
+				break;
+			}
 
           case '9':
-          {
-            {
-              char temps[17];
-              UINT64 address;
-              int size;
-              int err2,err3;
+			{
+				{
+					char temps[17];
+					UINT64 address = 0;
+					int size = 0;
+					int err2 = 0, err3 = 0;
 
-              sendstring("\nAddress:");
-              readstring(temps,16,16);
-              address=atoi2(temps,16,&err2);
+					sendstring("\nAddress:");
+					readstring(temps, 16, 16);
+					address = atoi2(temps, 16, &err2);
 
-              sendstring("\nNumber of bytes:");
-              readstring(temps,16,16);
-              size=atoi2(temps,10,&err3);
+					sendstring("\nNumber of bytes:");
+					readstring(temps, 16, 16);
+					size=atoi2(temps, 10, &err3);
 
-              {
-                _DecodedInst disassembled[22];
-                unsigned int i;
-                unsigned int used=0;
-                distorm_decode((UINT64)address,(unsigned char*)address, size, Decode64Bits, disassembled, 22, &used);
+					{
+						_DecodedInst disassembled[22];
+						unsigned int used = 0;
 
-                if (used)
-                {
-                  for (i=0; i<used; i++)
-                  {
-                    displayline("%x : %s - %s %s\n",
-                      disassembled[i].offset,
-                      disassembled[i].instructionHex.p,
-                      disassembled[i].mnemonic.p,
-                      disassembled[i].operands.p);
-                  }
+						distorm_decode((UINT64)address, (unsigned char*)address, size, Decode64Bits, disassembled, 22, &used);
+						if (used) {
+							for (unsigned int i = 0; i < used; i++) {
+								displayline("%x : %s - %s %s\n",
+										disassembled[i].offset,
+										disassembled[i].instructionHex.p,
+										disassembled[i].mnemonic.p,
+										disassembled[i].operands.p);
+							}
 
-                }
-                else
-                {
-                  displayline("Failure...\n");
-                }
-              }
-
-            }
-
-            break;
-          }
+						} else {
+							displayline("ERR: Failure...\n");
+						}
+					}
+				}
+				break;
+			}
 
           case 'a':
-          {
-            testBranchPrediction();
-            break;
-          }
+			{
+				testBranchPrediction();
+				break;
+			}
 
           case 'b':
-          {
-            reboot(0);
-            displayline("WTF?\n");
-            break;
-          }
+			{
+				reboot(0);
+				displayline("WTF?\n");
+				break;
+			}
 
           case 'e':
-          {
-            QWORD old=readMSR(EFER_MSR);
-            QWORD new;
+			{
+				QWORD old = readMSR(EFER_MSR);
+				sendstringf("old=%6\n", old);
 
-            sendstringf("old=%6\n", old);
+				QWORD new = old ^ (1 << 11);
+				new = new & (~(1 << 10));
+				sendstringf("new1=%6\n", new);
 
-            new=old ^ (1<<11);
-            new=new & (~(1<<10));
-            sendstringf("new1=%6\n", new);
-            writeMSR(EFER_MSR, new);
+				writeMSR(EFER_MSR, new);
 
-            new=readMSR(EFER_MSR);
-            sendstringf("new2=%6\n", new);
-            break;
-          }
+				new = readMSR(EFER_MSR);
+				sendstringf("new2=%6\n", new);
+				break;
+			}
 
           case 'o':
-          {
-            int count;
-            void *mem;
+			{
+				int count = 0;
+				void *mem;
 
-            while (1)
-            {
-              mem=malloc2(4096);
-              if (mem==NULL)
-              {
-                sendstringf("alloc fail\n");
-                while (1);
-              }
-              count++;
-              if (count%10==0)
-              {
-                sendstringf("count=%d\n", count);
-              }
-
-            }
-
-
-            break;
-          }
+				while (1) {
+					mem = malloc2(4096);
+					if (mem == NULL) {
+						sendstringf("ERR: alloc fail\n");
+						while (1);
+					}
+					count++;
+					if (count % 10 == 0) {
+						sendstringf("count=%d\n", count);
+					}
+				}
+				break;
+			}
 
           case 'v':
-          {
-            QWORD cr0=getCR0();
-            sendstringf("CR0=%x\n", cr0);
+			{
+				// TODO: leaving off here...
+				QWORD cr0=getCR0();
+				sendstringf("CR0=%x\n", cr0);
 
-            sendstring("Flipping WP\n");
+				sendstring("Flipping WP\n");
 
-            cr0=cr0 ^ CR0_WP;
-            setCR0(cr0);
-            cr0=getCR0();
-            sendstringf("CR0=%x\n", cr0);
+				cr0=cr0 ^ CR0_WP;
+				setCR0(cr0);
+				cr0=getCR0();
+				sendstringf("CR0=%x\n", cr0);
 
-            sendstring("Flipping NE\n");
-            cr0=cr0 ^ CR0_NE;
-            setCR0(cr0);
-            cr0=getCR0();
-            sendstringf("CR0=%x\n", cr0);
+				sendstring("Flipping NE\n");
+				cr0=cr0 ^ CR0_NE;
+				setCR0(cr0);
+				cr0=getCR0();
+				sendstringf("CR0=%x\n", cr0);
 
-            sendstring("Flipping NE again \n");
-            cr0=cr0 ^ CR0_NE;
-            setCR0(cr0);
-            cr0=getCR0();
-            sendstringf("CR0=%x\n", cr0);
+				sendstring("Flipping NE again \n");
+				cr0=cr0 ^ CR0_NE;
+				setCR0(cr0);
+				cr0=getCR0();
+				sendstringf("CR0=%x\n", cr0);
 
-            QWORD cr4=getCR4();
-            sendstringf("CR4=%x\n", cr4);
+				QWORD cr4=getCR4();
+				sendstringf("CR4=%x\n", cr4);
 
-            sendstring("Flipping CR4_OSXSAVE\n");
+				sendstring("Flipping CR4_OSXSAVE\n");
 
-            cr4=cr4 ^ CR4_OSXSAVE;
-            setCR4(cr4);
-            cr4=getCR4();
-            sendstringf("CR4=%x\n", cr4);
+				cr4=cr4 ^ CR4_OSXSAVE;
+				setCR4(cr4);
+				cr4=getCR4();
+				sendstringf("CR4=%x\n", cr4);
 
-            sendstring("Flipping CR4_VMXE\n");
+				sendstring("Flipping CR4_VMXE\n");
 
-            cr4=cr4 ^ CR4_VMXE;
-            setCR4(cr4);
-            cr4=getCR4();
-            sendstringf("CR4=%x\n", cr4);
+				cr4=cr4 ^ CR4_VMXE;
+				setCR4(cr4);
+				cr4=getCR4();
+				sendstringf("CR4=%x\n", cr4);
 
-            sendstring("Flipping CR4_VMXE again\n");
+				sendstring("Flipping CR4_VMXE again\n");
 
-            cr4=cr4 ^ CR4_VMXE;
-            setCR4(cr4);
-            cr4=getCR4();
-            sendstringf("CR4=%x\n", cr4);
+				cr4=cr4 ^ CR4_VMXE;
+				setCR4(cr4);
+				cr4=getCR4();
+				sendstringf("CR4=%x\n", cr4);
 
 
 
-            break;
-          }
+				break;
+			}
 
           case 'w':
           {
