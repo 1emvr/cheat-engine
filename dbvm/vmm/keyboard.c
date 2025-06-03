@@ -3,89 +3,73 @@
 #define dataport 0x60
 #define commandport 0x64
 
-void kdb_readycommand(void)
-{
-	unsigned char x;
-	x=(inportb(commandport) >> 1) & 1;
-	while (x)
-	{
+void kdb_readycommand(void) {
+	unsigned char x = (inportb(commandport) >> 1) & 1;
+	while (x) {
 		inportb(dataport);
-		x=(inportb(commandport) >> 1) & 1;
+		x = (inportb(commandport) >> 1) & 1;
 	}
-	
-	x=inportb(commandport) & 1;;
-	while (x)
-	{
+
+	x = inportb(commandport) & 1;;
+	while (x) {
 		inportb(dataport);
-		x=inportb(commandport) & 1;;
+		x = inportb(commandport) & 1;;
 	}	
 }
 
-unsigned char kbd_getstatus(void)
-{
+unsigned char kbd_getstatus(void) {
 	return inportb(commandport);
 }
 
-unsigned char kdb_getoutputport(void)
-{
+unsigned char kdb_getoutputport(void) {
 	kdb_readycommand();	
-	outportb(commandport,0xd0);	
+	outportb(commandport, 0xd0);	
 	return inportb(dataport);	
 }
 
-void kdb_setoutputport(unsigned char bt)
-{
+void kdb_setoutputport(unsigned char bt) {
 	kdb_readycommand();	
-	outportb(commandport,0xd1);	
+	outportb(commandport, 0xd1);	
 	outportb(dataport,bt);
 }
 
-unsigned char kdb_getinputport(void)
-{
+unsigned char kdb_getinputport(void) {
 	kdb_readycommand();	
-	outportb(commandport,0xc0);	
+	outportb(commandport, 0xc0);	
 	return inportb(dataport);		
 }
 
-unsigned char kdb_getcommandbyte(void)
-{
+unsigned char kdb_getcommandbyte(void) {
 	kdb_readycommand();	
-	outportb(commandport,0x20);	
+	outportb(commandport, 0x20);	
 	return inportb(dataport);		
 }
 
-void kdb_setcommandbyte(unsigned char bt)
-{
+void kdb_setcommandbyte(unsigned char bt) {
 	kdb_readycommand();	
-	outportb(commandport,0x60);	
+	outportb(commandport, 0x60);	
 	outportb(dataport,bt);
 }
 
-int kdb_iskeypressed(void)
-{
+int kdb_iskeypressed(void) {
 	return inportb(commandport) & 1;	
 }
 
-
-void kdb_waitforkeypress(void)
-{
-  while (!kdb_iskeypressed())
-  	resync();  
+void kdb_waitforkeypress(void) {
+	while (!kdb_iskeypressed()) {
+		resync();  
+	}
 }
 
-unsigned char kbd_getkey(void)
-{
+unsigned char kbd_getkey(void) {
 	kdb_waitforkeypress();
 	return inportb(dataport);
 }
 
-char kbd_convertscancodetochar(unsigned char scancode, int scancodeset )
-{
-  //displayline(" -%x- ", scancode);
-	if (scancodeset==1)
-	{
-		switch (scancode)
-		{
+char kbd_convertscancodetochar(unsigned char scancode, int scancodeset) {
+	//displayline(" -%x- ", scancode);
+	if (scancodeset == 1) {
+		switch (scancode) {
 			case 1: return 27; //escape
 			case 2: return '1';
 			case 3: return '2';
@@ -138,7 +122,7 @@ char kbd_convertscancodetochar(unsigned char scancode, int scancodeset )
 			case 0x34: return '.';
 			case 0x35: return '/';
 			case 0x39: return ' ';
-			
+
 
 			case 0x47: return 1; //home
 			case 0x49: return 3; //page up
@@ -150,14 +134,11 @@ char kbd_convertscancodetochar(unsigned char scancode, int scancodeset )
 	} else return 0;
 }
 
-
-
-char kbd_getchar(void)
-{
+char kbd_getchar(void) {
 	//kbd_getkey returns the scancode of the keyboard, which will need to be converted to a pressed char
-	char k=kbd_convertscancodetochar(kbd_getkey(),1);
-  while (!k)
-    k=kbd_convertscancodetochar(kbd_getkey(),1); 
-  
-  return k; //todo, check which scancoce set is currently being used
+	char k = kbd_convertscancodetochar(kbd_getkey(), 1);
+	while (!k) {
+		k = kbd_convertscancodetochar(kbd_getkey(), 1); 
+	}
+	return k; //todo, check which scancoce set is currently being used
 }
